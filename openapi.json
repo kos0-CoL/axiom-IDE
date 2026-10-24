@@ -1,0 +1,3219 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Axiom Web",
+    "version": "0.9.31-delegate",
+    "description": "B-web: mismo store SQLite que la TUI; toda decisión pasa por broker.",
+    "contact": {
+      "name": "Axiom"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8787",
+      "description": "axiom serve local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "vistas",
+      "description": "Lectura del mismo store SQLite (sin divergencia TUI)"
+    },
+    {
+      "name": "broker",
+      "description": "Decisiones allow|deny|ask auditadas"
+    },
+    {
+      "name": "configuracion",
+      "description": "Proveedor LLM y canal Telegram (solo local; secretos nunca viajan)"
+    },
+    {
+      "name": "chat",
+      "description": "Sesiones y mensajes del chat (solo local; historial en SQLite del proyecto)"
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "pagina",
+        "summary": "Página CRT (tokens solo en :root)",
+        "description": "HTML único inline: grid orquestación/trabajo/aprobaciones + Telegram lab + consola.",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orquestacion": {
+      "get": {
+        "operationId": "orquestacion",
+        "summary": "Techo, tareas por estado y aprobaciones recientes",
+        "description": "Mismas consultas que la TUI (UI-SPEC 5: sin divergencia).",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Vista orquestación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Orquestacion"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trabajo": {
+      "get": {
+        "operationId": "trabajo",
+        "summary": "Specs con tareas y estados",
+        "description": "Specs versionadas con sus tareas y estados implementado/verificado/aceptado/bloqueado/rechazado. Cada tarea trae archivos (artefactos declarados en verify --archivos, validados contra la allowlist).",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Vista trabajo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trabajo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/adapters/config": {
+      "get": {
+        "operationId": "adaptersConfig",
+        "summary": "Proveedor LLM activo y budgets",
+        "description": "Lee adapters.config.json (AXM-062). Sin secretos en la respuesta.",
+        "tags": [
+          "configuracion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuración vigente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptersConfigView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Config corrupta (fail closed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "adaptersConfigSet",
+        "summary": "Cambia proveedor/model/base/timeouts (solo local)",
+        "description": "Aplica parcial: proveedor|model|baseUrl|timeoutMs|maxChars. Cambiar no toca specs.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdaptersConfigIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cambios aplicados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/adapters/spawn": {
+      "post": {
+        "operationId": "adaptersSpawn",
+        "summary": "Chat directo con el proveedor activo",
+        "description": "Vista Chat: delega en adapters.spawn con budget; la key sale del env del servidor, nunca del navegador.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpawnIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado del proveedor (ok o ERROR fail-closed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpawnOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "task inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram/config": {
+      "get": {
+        "operationId": "tgConfig",
+        "summary": "Allowlist, expiración y presencia de secretos",
+        "description": "botToken/webhookSecret son booleanos de presencia: los valores nunca salen del servidor.",
+        "tags": [
+          "configuracion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuración del canal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TgConfigView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Config corrupta (fail closed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "tgConfigSet",
+        "summary": "allow|unallow|expira (solo local)",
+        "description": "Gestiona la allowlist y la expiración sin editar archivos a mano.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TgConfigIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cambio aplicado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "action inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Valor rechazado (fail closed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents": {
+      "get": {
+        "operationId": "agentsGrafo",
+        "summary": "Grafo de orquestación: agentes y aristas",
+        "description": "Orquestador, nodos, especializados, subagentes y skills. Sin ejecución real aún.",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Grafo vigente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/add": {
+      "post": {
+        "operationId": "agentsAdd",
+        "summary": "Añade agente al grafo (solo local)",
+        "description": "id + rol (orquestador|nodo|especializado|subagente). Persiste en agents.config.json.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Añadido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/pause": {
+      "post": {
+        "operationId": "agentsPause",
+        "summary": "Pausa o reactiva un agente (solo local)",
+        "description": "Alterna activo/pausado sin borrar el grafo.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPauseIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado cambiado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agente inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/skill": {
+      "post": {
+        "operationId": "agentsSkill",
+        "summary": "Asigna skill a un agente (solo local)",
+        "description": "Skills declaran capacidades (plan, broker, implementar, verify, review, evidence, policy, sandbox...).",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSkillIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill asignada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/adapters/modelos": {
+      "get": {
+        "operationId": "adaptersModelos",
+        "summary": "Catálogo de modelos por proveedor con filtro",
+        "description": "?proveedor=…&filtro=todos|free|recomendados. Con proveedor=openrouter&live=1 lista la oferta real (requiere key en servidor).",
+        "tags": [
+          "configuracion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Catálogo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelosView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/secrets": {
+      "post": {
+        "operationId": "secretsSet",
+        "summary": "Guarda claves solo en el servidor (solo local)",
+        "description": "Escribe .axiom-secrets.json (0600, gitignored). La respuesta solo confirma nombres, nunca valores.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Guardadas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sin claves conocidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/secrets/presencia": {
+      "get": {
+        "operationId": "secretsPresencia",
+        "summary": "Presencia booleana de claves (nunca valores)",
+        "description": "La web muestra ok/— por clave. Los valores jamás salen del servidor.",
+        "tags": [
+          "configuracion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Presencia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/decide": {
+      "post": {
+        "operationId": "decide",
+        "summary": "Aprueba o rechaza vía broker (audita quién=web)",
+        "description": "Delega en broker.decide: single-use, primera respuesta gana, expiración configurable.",
+        "tags": [
+          "broker"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decidida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya decidida, inexistente o expirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proyecto": {
+      "get": {
+        "operationId": "proyecto",
+        "summary": "Raíz del proyecto que sirve esta web",
+        "description": "Cada proyecto (root) guarda sus sesiones en su propio SQLite. Cambiar de proyecto = servir otro root.",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "Raíz activa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProyectoView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proyecto/crear": {
+      "post": {
+        "operationId": "proyectoCrear",
+        "summary": "Crea la carpeta del proyecto y cambia a ella",
+        "description": "Crea <base>/<nombre> con specs, políticas y SQLite propio, y la sirve sin reiniciar. La carpeta de agentes y sesiones nace aquí.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProyectoCrearIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creado y en uso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProyectoView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nombre o base inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proyecto/usar": {
+      "post": {
+        "operationId": "proyectoUsar",
+        "summary": "Cambia a una carpeta de proyecto existente",
+        "description": "Valida la ruta del servidor, inicializa lo que falte sin pisar nada y la sirve sin reiniciar. Sesiones aisladas por root.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProyectoUsarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "En uso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProyectoView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ruta inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos": {
+      "get": {
+        "operationId": "modulos",
+        "summary": "Lista módulos con su estado por proyecto",
+        "description": "Catálogo cableado + esqueletos detectados; enabled por proyecto (modules.json, on por defecto). Apagar cierra sus rutas web (409) y su CLI.",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "Módulos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModulosView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "modulosAccion",
+        "summary": "Habilita, deshabilita, ubica o crea un módulo",
+        "description": "action on|off cambia modules.json del proyecto; vista fija dónde se ve (solo|columna|barra); new crea el módulo con datosModulo + manifiesto con panel y rango axiom (tipo grafo|lista|texto + descripcion); regen reedita con la plantilla vigente.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModuloIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Aplicado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Acción o nombre inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos/datos": {
+      "get": {
+        "operationId": "modulosDatos",
+        "summary": "Datos de un módulo para su panel (sin cablear)",
+        "description": "Importa src/modules/<nombre>/index.js por nombre validado y llama a datosModulo(root). Sin export o apagado: 404/409 fail closed. Es como Intended vs Executed pero genérico.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "nombre",
+            "in": "query",
+            "description": "Nombre del módulo",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datos del módulo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "nombre"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "nombre": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Módulo desconocido, sin datos o no cargable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos/propuestas/generar": {
+      "post": {
+        "operationId": "modulosPropuestaGenerar",
+        "summary": "Genera con el proveedor LLM una propuesta de módulo comprobable",
+        "description": "Flujo creador desde el chat: recoge referencias (búsqueda externa o las aportadas), el proveedor LLM propone código dentro del contrato puro datosModulo(root) y el servidor compila, valida estáticamente y ejecuta el contrato aislado. Solo se persiste lo que pasa; hasta dos pasadas (la segunda con los errores exactos del validador). Requiere el módulo agents activo.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModuloPropuestaGenerarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Propuesta generada, validada y persistida (sin instalar)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaGenerarOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida (necesidad vacía o mode desconocido)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo agents deshabilitado o nombre ya existente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "La validación estática o de contrato rechazó el código tras la ronda correctiva",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Límite de la búsqueda externa alcanzado; reintenta según la cabecera Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "El proveedor no generó una implementación utilizable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Proveedor LLM apagado o búsqueda externa sin EXA_API_KEY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos/propuestas": {
+      "get": {
+        "operationId": "modulosPropuesta",
+        "summary": "Devuelve una propuesta de módulo persistida por id",
+        "description": "Lee la propuesta guardada en SQLite (payload con checksum SHA-256); un payload alterado no se devuelve ni puede aprobarse.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Identificador de la propuesta",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Propuesta existente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta el id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Propuesta inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos/propuestas/validar": {
+      "post": {
+        "operationId": "modulosPropuestaValidar",
+        "summary": "Revalida estáticamente y en contrato aislado una propuesta persistida",
+        "description": "Repite la validación completa (subconjunto TS puro, compilación y ejecución del contrato en worker aislado) sin tocar la instalación; sirve para confirmar que sigue válida antes de aprobar.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModuloPropuestaValidarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validación correcta (errores vacío)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaValidarOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Propuesta inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "La propuesta ya no pasa la validación; errores exactos por campo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaValidarOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos/propuestas/aprobar": {
+      "post": {
+        "operationId": "modulosPropuestaAprobar",
+        "summary": "Instala una propuesta aprobada, apagada (fail closed)",
+        "description": "Exige confirmar=true (gate humano). Revalida, verifica el checksum persistido, escribe manifiesto/index/config en src/modules/<nombre> y registra el módulo apagado; un segundo intento con la misma propuesta ya instalada devuelve 404 (sin repetir instalación).",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModuloPropuestaAprobarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Instalada y registrada apagada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaAprobarOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta la confirmación humana explícita (confirmar=true e id)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Propuesta inexistente o ya instalada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo agents deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Revalidación o instalación fallida; no se modifica el módulo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuloPropuestaErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/handoff": {
+      "post": {
+        "operationId": "agentsHandoff",
+        "summary": "Transfiere una tarea entre agentes (auditado)",
+        "description": "Requiere arista de delegación de→a y agentes activos; el broker autoriza (delega, riesgo medio). Pendiente/denegado quedan en handoff_log.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandoffIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Registrado o pendiente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Datos inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Denegado por política",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/run": {
+      "post": {
+        "operationId": "runPlan",
+        "summary": "Previsualiza o ejecuta un run",
+        "description": "Dry-run (defecto) no gasta ni escribe informes; con dryRun:false ejecuta rondas; con agente:true el proveedor trabaja y juzga las pendientes (gasta tokens reales). Verifica huella de config y techo antes.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plan o run OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Parámetros inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bloqueado (techo, huella, rondas)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/define": {
+      "post": {
+        "operationId": "agentsDefine",
+        "summary": "Define detalles de un AgentDefinition",
+        "description": "Campos: instrucciones (1-2000), herramienta (tool=allow|ask|deny), noherramienta, presupuesto (tokens:calls), nopresupuesto. Valida formato y revalida el config.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgenteDefineIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Actualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Campo o valor inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/handoffs": {
+      "get": {
+        "operationId": "agentsHandoffs",
+        "summary": "Historial de handoffs auditados",
+        "description": "Log de transferencias con decisión y aprobación asociada.",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "Handoffs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/experience": {
+      "get": {
+        "operationId": "agentsExperience",
+        "summary": "Últimas lecciones de la memoria del harness",
+        "description": "Lee EXPERIENCE.md (una lección por verify: qué del harness ayudó o estorbó). Parámetro n (1-50, defecto 3).",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "n",
+            "in": "query",
+            "description": "Número de lecciones (1-50)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lecciones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperienceView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/propuestas": {
+      "get": {
+        "operationId": "agentsPropuestas",
+        "summary": "Propuestas pendientes de ajuste del harness",
+        "description": "Filas de harness_propuestas en estado propuesta (se revisan en Plan, las aplica un humano).",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "Propuestas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropuestasView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/snapshot": {
+      "get": {
+        "operationId": "agentsSnapshot",
+        "summary": "Snapshot del harness usado por un run",
+        "description": "agents.config.json tal cual quedó fijado en harness_snapshot. Sin parámetro run devuelve el último; con run=<id> ese run.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "run",
+            "in": "query",
+            "description": "Id del run (vacío = último)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sin snapshot para ese run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/sesiones": {
+      "get": {
+        "operationId": "chatSesiones",
+        "summary": "Lista sesiones del proyecto",
+        "description": "Ordenadas por actividad reciente, archivadas incluidas (la web filtra).",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesiones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionesView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "chatSesionCrear",
+        "summary": "Crea una sesión (solo local)",
+        "description": "Título opcional (1-80); modo ask|plan|build. Persiste en SQLite.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SesionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Valor inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/sesiones/{id}": {
+      "post": {
+        "operationId": "chatSesionAccion",
+        "summary": "renombrar|archivar|restaurar (solo local)",
+        "description": "Gestiona la sesión sin borrar historial. Eliminar = archivar, no borrar.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SesionAccionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Aplicado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "action inválida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sesión inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/sesiones/{id}/mensajes": {
+      "get": {
+        "operationId": "chatMensajes",
+        "summary": "Historial de la sesión",
+        "description": "Mensajes usuario/asistente/sistema con proveedor, modelo, skill y latencia.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mensajes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MensajesView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sesión inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/skills": {
+      "get": {
+        "operationId": "chatSkills",
+        "summary": "Skills disponibles por agente",
+        "description": "Se leen del grafo real del módulo agents (orquestador → nodos → especializados).",
+        "tags": [
+          "chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "Skills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/telegram/detectar": {
+      "get": {
+        "operationId": "tgDetectar",
+        "summary": "Detecta chats que hablaron al bot (getUpdates)",
+        "description": "Lee las novedades del bot y devuelve ids con nombre para autorizar con un clic. Nunca devuelve el token.",
+        "tags": [
+          "configuracion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Chats detectados (puede traer nota si no hay nuevos)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetectarView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Sin token o Telegram no responde",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/secrets/olvidar": {
+      "post": {
+        "operationId": "secretsOlvidar",
+        "summary": "Olvida una clave del servidor (solo local)",
+        "description": "Borra la clave de .axiom-secrets.json. Las que vienen del entorno no se pueden borrar desde la web.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OlvidarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Olvidada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Key desconocida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No estaba guardada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Viene del entorno",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/enviar": {
+      "post": {
+        "operationId": "chatEnviar",
+        "summary": "Envía un mensaje en modo ask|plan|build (solo local)",
+        "description": "Sin session_id crea la sesión (título auto). Guarda usuario y respuesta en SQLite. El modo cambia el encargo al proveedor; la skill enfoca la respuesta.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatEnviarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Respuesta (ok o ERROR fail-closed, ambas guardadas)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatEnviarOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "texto inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sesión inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/aprobar": {
+      "post": {
+        "operationId": "planAprobar",
+        "summary": "Aprueba la propuesta-plan y pasa la sesión a build",
+        "description": "Marca la propuesta indicada como aprobada y cambia el modo de su sesión a build. La propuesta persiste en SQLite (plan_propuestas).",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanAprobarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Propuesta aprobada, sesión en build",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanAprobarOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Propuesta inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Propuesta ya decidida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staging": {
+      "get": {
+        "operationId": "stagingVer",
+        "summary": "Allowlist de staging y archivos fuera",
+        "description": "Lee project.json:allow (defecto si falta) y lista archivos del workspace fuera de la allowlist.",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Allowlist vigente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StagingView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "stagingEditar",
+        "summary": "Añade, quita o restablece patrones de la allowlist",
+        "description": "action add|remove con patron (máx 64, sin ..) o reset al defecto. Máx 32 patrones.",
+        "tags": [
+          "vistas"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagingIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Aplicado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Patrón o acción inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Orquestacion": {
+        "type": "object",
+        "required": [
+          "techo",
+          "tareas",
+          "aprobaciones",
+          "usos"
+        ],
+        "properties": {
+          "techo": {
+            "type": "object",
+            "required": [
+              "rondas",
+              "tokens",
+              "calls"
+            ]
+          },
+          "tareas": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "aprobaciones": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "usos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsoSpawn"
+            },
+            "description": "Últimos spawns con tokens medidos o estimados."
+          }
+        }
+      },
+      "Trabajo": {
+        "type": "object",
+        "required": [
+          "specs"
+        ],
+        "description": "Specs con tareas; cada tarea trae archivos (nº de artefactos declarados en verify --archivos, validados contra la allowlist de project.json).",
+        "properties": {
+          "specs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "ver",
+                "title",
+                "status",
+                "tareas"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "ver": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "tareas": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "ver",
+                      "estado",
+                      "archivos"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "ver": {
+                        "type": "string"
+                      },
+                      "estado": {
+                        "type": "string"
+                      },
+                      "archivos": {
+                        "type": "integer",
+                        "description": "Nº de artefactos declarados en la evidencia (separación artefactos-vs-veredictos, F10)."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "DecideIn": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "aprueba": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DecideOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "msg"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "msg": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "error"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "AdaptersConfigView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "config"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "object",
+            "required": [
+              "proveedor",
+              "model",
+              "base",
+              "timeoutMs",
+              "maxChars"
+            ],
+            "properties": {
+              "proveedor": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer"
+              },
+              "maxChars": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "AdaptersConfigIn": {
+        "type": "object",
+        "properties": {
+          "proveedor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer"
+          },
+          "maxChars": {
+            "type": "integer"
+          }
+        }
+      },
+      "SpawnIn": {
+        "type": "object",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer"
+          }
+        }
+      },
+      "SpawnOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "ms",
+          "proveedor",
+          "model"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "ms": {
+            "type": "integer"
+          },
+          "proveedor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "truncada": {
+            "type": "boolean"
+          },
+          "uso": {
+            "$ref": "#/components/schemas/UsoSpawn"
+          }
+        }
+      },
+      "TgConfigView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "allowlist",
+          "expiracionMin",
+          "botToken",
+          "webhookSecret"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiracionMin": {
+            "type": "integer"
+          },
+          "botToken": {
+            "type": "boolean"
+          },
+          "webhookSecret": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TgConfigIn": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "chat": {
+            "type": "string"
+          },
+          "min": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "agentes",
+          "aristas"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "agentes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "aristas": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "AgentIn": {
+        "type": "object",
+        "required": [
+          "id",
+          "rol"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "rol": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentPauseIn": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentSkillIn": {
+        "type": "object",
+        "required": [
+          "id",
+          "skill"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          }
+        }
+      },
+      "ModelosView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "modelos"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "modelos": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "SecretsIn": {
+        "type": "object",
+        "properties": {
+          "OPENAI_API_KEY": {
+            "type": "string"
+          },
+          "ANTHROPIC_API_KEY": {
+            "type": "string"
+          },
+          "GOOGLE_API_KEY": {
+            "type": "string"
+          },
+          "OPENROUTER_API_KEY": {
+            "type": "string"
+          },
+          "AXIOM_LITELLM_KEY": {
+            "type": "string"
+          },
+          "AXIOM_TELEGRAM_BOT_TOKEN": {
+            "type": "string"
+          },
+          "AXIOM_TELEGRAM_WEBHOOK_SECRET": {
+            "type": "string"
+          }
+        }
+      },
+      "DetectarView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "chats"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "chats": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "nota": {
+            "type": "string"
+          }
+        }
+      },
+      "OlvidarIn": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "SecretsView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "presencia"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "presencia": {
+            "type": "object"
+          }
+        }
+      },
+      "ProyectoView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "root"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "root": {
+            "type": "string"
+          }
+        }
+      },
+      "Modulo": {
+        "type": "object",
+        "required": [
+          "nombre",
+          "version",
+          "descripcion",
+          "configFile",
+          "cableado",
+          "enabled",
+          "vista",
+          "superficie",
+          "panel",
+          "compat"
+        ],
+        "properties": {
+          "nombre": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "configFile": {
+            "type": "string"
+          },
+          "cableado": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "vista": {
+            "type": "string",
+            "description": "Dónde se ve el módulo: solo (Configuración), columna (actividad) o barra (sobre el chat)"
+          },
+          "superficie": {
+            "type": "array",
+            "description": "Archivos declarados en editables del manifiesto",
+            "items": {
+              "type": "string"
+            }
+          },
+          "panel": {
+            "type": "string",
+            "description": "Tipo de panel que el módulo sabe pintar (del manifiesto) o nulo: grafo, ...",
+            "nullable": true
+          },
+          "compat": {
+            "type": "string",
+            "description": "Detalle de compatibilidad con la versión Axiom (rango axiom del manifiesto): compatible o DESACTUALIZADO + reedición sugerida"
+          }
+        }
+      },
+      "ModulosView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "modulos"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "modulos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Modulo"
+            }
+          }
+        }
+      },
+      "Handoff": {
+        "type": "object",
+        "required": [
+          "id",
+          "de",
+          "a",
+          "tarea",
+          "decision",
+          "approval_id",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "de": {
+            "type": "string"
+          },
+          "a": {
+            "type": "string"
+          },
+          "tarea": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "approval_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "HandoffsView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "handoffs"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "handoffs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Handoff"
+            }
+          }
+        }
+      },
+      "ExperienceView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "lecciones"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "lecciones": {
+            "type": "string"
+          }
+        }
+      },
+      "Propuesta": {
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "verdict",
+          "estado",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "estado": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "PropuestasView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "propuestas"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "propuestas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Propuesta"
+            }
+          }
+        }
+      },
+      "SnapshotView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "run_id",
+          "fingerprint",
+          "harness",
+          "created_at"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "RunIn": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "rondas": {
+            "type": "integer"
+          },
+          "tokens": {
+            "type": "integer"
+          },
+          "calls": {
+            "type": "integer"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "agente": {
+            "type": "boolean",
+            "description": "F12: el proveedor trabaja y juzga las pendientes (2 spawns/tarea, tope 4)."
+          }
+        }
+      },
+      "AgenteDefineIn": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "campo": {
+            "type": "string"
+          },
+          "valor": {
+            "type": "string"
+          }
+        }
+      },
+      "HandoffIn": {
+        "type": "object",
+        "properties": {
+          "de": {
+            "type": "string"
+          },
+          "a": {
+            "type": "string"
+          },
+          "tarea": {
+            "type": "string"
+          }
+        }
+      },
+      "ModuloIn": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "vista": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string",
+            "description": "Tipo de panel del creador: grafo|lista|texto"
+          },
+          "descripcion": {
+            "type": "string",
+            "description": "Descripción de la función del módulo para la plantilla"
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "Si es true, al crear el módulo queda apagado (fail closed); el usuario lo enciende luego en Configuración → Módulos"
+          }
+        }
+      },
+      "ReferenciaModulo": {
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "snippet"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "Extracto de la fuente; dato no confiable, nunca instrucciones"
+          }
+        }
+      },
+      "ModuloPropuesta": {
+        "type": "object",
+        "required": [
+          "id",
+          "nombre",
+          "tipo",
+          "descripcion",
+          "resumen",
+          "referencias",
+          "estado",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string",
+            "description": "Tipo de panel: grafo|lista|texto"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "resumen": {
+            "type": "string"
+          },
+          "referencias": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReferenciaModulo"
+            }
+          },
+          "estado": {
+            "type": "string",
+            "description": "pendiente | instalada"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ModuloPropuestaView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "propuesta"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "propuesta": {
+            "$ref": "#/components/schemas/ModuloPropuesta"
+          }
+        }
+      },
+      "ModuloPropuestaGenerarIn": {
+        "type": "object",
+        "required": [
+          "necesidad"
+        ],
+        "properties": {
+          "necesidad": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000,
+            "description": "Qué debe hacer el módulo, en lenguaje natural"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "web",
+              "github"
+            ],
+            "description": "Fuente de la búsqueda externa (defecto web)"
+          },
+          "buscar": {
+            "type": "boolean",
+            "description": "false = no buscar referencias externas (defecto: buscar)"
+          },
+          "referencias": {
+            "type": "array",
+            "maxItems": 5,
+            "description": "Referencias aportadas en chat; solo https, se normalizan servidor",
+            "items": {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "snippet": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ModuloPropuestaGenerarOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "propuesta",
+          "proveedor",
+          "model",
+          "ms",
+          "intentos"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "propuesta": {
+            "$ref": "#/components/schemas/ModuloPropuesta"
+          },
+          "proveedor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ms": {
+            "type": "number",
+            "description": "Tiempo total de generación acumulado en las pasadas"
+          },
+          "intentos": {
+            "type": "integer",
+            "description": "Pasadas reales usadas (1-2)"
+          }
+        }
+      },
+      "ModuloPropuestaValidarIn": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "ModuloPropuestaValidarOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "errores"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "errores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ModuloPropuestaAprobarIn": {
+        "type": "object",
+        "required": [
+          "id",
+          "confirmar"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "confirmar": {
+            "type": "boolean",
+            "description": "Debe ser true: la instalación exige confirmación humana explícita"
+          }
+        }
+      },
+      "ModuloPropuestaAprobarOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "msg",
+          "enabled",
+          "modulo"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "msg": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Siempre false: el módulo se instala apagado (fail closed)"
+          },
+          "modulo": {
+            "$ref": "#/components/schemas/Modulo"
+          }
+        }
+      },
+      "ModuloPropuestaErrorOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "error"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "errores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Errores exactos del validador cuando los hay"
+          },
+          "intentos": {
+            "type": "integer"
+          },
+          "retryAfter": {
+            "type": "string",
+            "description": "Sugerencia de espera cuando la búsqueda externa está limitada"
+          }
+        }
+      },
+      "ProyectoCrearIn": {
+        "type": "object",
+        "properties": {
+          "nombre": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string"
+          }
+        }
+      },
+      "ProyectoUsarIn": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "Sesion": {
+        "type": "object",
+        "required": [
+          "id",
+          "titulo",
+          "modo",
+          "archivada",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "titulo": {
+            "type": "string"
+          },
+          "modo": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "plan",
+              "build"
+            ]
+          },
+          "archivada": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "SesionView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "sesion"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "sesion": {
+            "$ref": "#/components/schemas/Sesion"
+          }
+        }
+      },
+      "SesionesView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "sesiones"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "sesiones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sesion"
+            }
+          }
+        }
+      },
+      "SesionIn": {
+        "type": "object",
+        "properties": {
+          "titulo": {
+            "type": "string"
+          },
+          "modo": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "plan",
+              "build"
+            ]
+          }
+        }
+      },
+      "SesionAccionIn": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "renombrar",
+              "archivar",
+              "restaurar"
+            ]
+          },
+          "titulo": {
+            "type": "string"
+          }
+        }
+      },
+      "ChatMensaje": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "rol",
+          "texto"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "rol": {
+            "type": "string",
+            "enum": [
+              "usuario",
+              "asistente",
+              "sistema"
+            ]
+          },
+          "texto": {
+            "type": "string"
+          },
+          "proveedor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "skill": {
+            "type": "string"
+          },
+          "ms": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "MensajesView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "mensajes"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "mensajes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMensaje"
+            }
+          }
+        }
+      },
+      "ChatEnviarIn": {
+        "type": "object",
+        "required": [
+          "texto"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "modo": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "plan",
+              "build"
+            ]
+          },
+          "skill": {
+            "type": "string"
+          },
+          "texto": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer"
+          }
+        }
+      },
+      "ChatEnviarOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "session_id",
+          "texto"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "texto": {
+            "type": "string"
+          },
+          "proveedor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ms": {
+            "type": "integer"
+          },
+          "truncada": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "uso": {
+            "$ref": "#/components/schemas/UsoSpawn"
+          },
+          "propuesta_id": {
+            "type": "string"
+          },
+          "propuesta_modulo": {
+            "type": "object",
+            "description": "Propuesta de módulo a crear (solo cuando el chat detecta intención de crear módulo y el modelo devuelve el bloque ```modulo). El cliente la pinta como tarjeta; al confirmar se crea apagado.",
+            "required": [
+              "nombre",
+              "tipo",
+              "descripcion"
+            ],
+            "properties": {
+              "nombre": {
+                "type": "string"
+              },
+              "tipo": {
+                "type": "string",
+                "description": "Tipo de panel: grafo|lista|texto"
+              },
+              "descripcion": {
+                "type": "string"
+              }
+            },
+            "nullable": true
+          }
+        }
+      },
+      "PlanAprobarIn": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanAprobarOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "propuesta_id",
+          "session_id",
+          "modo"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "propuesta_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "modo": {
+            "type": "string"
+          },
+          "msg": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "SkillsView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "skills"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "StagingView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "allow",
+          "fuera",
+          "defecto"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fuera": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defecto": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "StagingIn": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "patron": {
+            "type": "string"
+          }
+        }
+      },
+      "UsoSpawn": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "respuesta",
+          "total",
+          "fuente"
+        ],
+        "description": "Tokens del spawn: medido (usage del proveedor) o estimado (~4 caracteres por token).",
+        "properties": {
+          "prompt": {
+            "type": "integer"
+          },
+          "respuesta": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "fuente": {
+            "type": "string",
+            "enum": [
+              "medido",
+              "estimado"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
