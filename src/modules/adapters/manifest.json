@@ -1,0 +1,16 @@
+{
+  "name": "adapters",
+  "version": "0.1.0",
+  "scope": "global",
+  "default": true,
+  "description": "Proveedor LLM conmutable por config (AXM-062): off|ollama|litellm. Una sola integración activa; cambiar no toca specs.",
+  "contracts": ["adapters.spawn"],
+  "transports": ["cli"],
+  "patterns": ["single-active-provider", "fail-closed", "config-switch"],
+  "config_file": "adapters.config.json",
+  "configurables": ["proveedor", "model", "baseUrl", "timeoutMs", "maxChars"],
+  "env": ["AXIOM_LITELLM_KEY"],
+  "panel": { "tipo": "texto" },
+  "editables": ["manifest.json", "index.ts", "config.ts", "route.ts", "openai_compat.ts", "litellm.ts", "ollama.ts"],
+  "cli": ["adapters config", "adapters use <off|ollama|litellm>", "adapters model <nombre>", "adapters url <url|->", "adapters spawn <tarea...> [--timeout MS]"]
+}

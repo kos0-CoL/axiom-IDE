@@ -1,0 +1,5 @@
+{
+  "name": "axiom-project",
+  "harness": "0.2.0-a2",
+  "preset": "axiom"
+}

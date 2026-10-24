@@ -1,0 +1,1 @@
+export { TrabajoPanel } from './TrabajoPanel';

@@ -1,0 +1,75 @@
+{
+  "agentes": [
+    {
+      "id": "orquestador",
+      "rol": "orquestador",
+      "modelo": "hereda-proveedor",
+      "estado": "activo",
+      "skills": [
+        "plan",
+        "broker"
+      ],
+      "instrucciones": "",
+      "herramientas": []
+    },
+    {
+      "id": "nodo-code",
+      "rol": "nodo",
+      "modelo": "hereda-proveedor",
+      "estado": "activo",
+      "skills": [
+        "implementar",
+        "verify",
+        "testing"
+      ],
+      "instrucciones": "test instructions",
+      "herramientas": []
+    },
+    {
+      "id": "nodo-review",
+      "rol": "nodo",
+      "modelo": "hereda-proveedor",
+      "estado": "activo",
+      "skills": [
+        "review",
+        "evidence"
+      ],
+      "instrucciones": "",
+      "herramientas": []
+    },
+    {
+      "id": "esp-seguridad",
+      "rol": "especializado",
+      "modelo": "hereda-proveedor",
+      "estado": "pausado",
+      "skills": [
+        "policy",
+        "sandbox"
+      ],
+      "instrucciones": "",
+      "herramientas": []
+    }
+  ],
+  "aristas": [
+    {
+      "de": "orquestador",
+      "a": "nodo-code",
+      "tipo": "delega"
+    },
+    {
+      "de": "orquestador",
+      "a": "nodo-review",
+      "tipo": "delega"
+    },
+    {
+      "de": "nodo-code",
+      "a": "esp-seguridad",
+      "tipo": "escala"
+    },
+    {
+      "de": "nodo-review",
+      "a": "orquestador",
+      "tipo": "comunica"
+    }
+  ]
+}

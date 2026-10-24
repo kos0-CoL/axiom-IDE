@@ -1,0 +1,13 @@
+{
+  "name": "agents",
+  "version": "0.1.0",
+  "scope": "global",
+  "default": true,
+  "description": "Grafo de orquestación: orquestador, nodos, especializados, subagentes y skills. Sin ejecución real aún: declara y diagrama.",
+  "contracts": ["agents.grafo"],
+  "transports": ["cli", "web"],
+  "patterns": ["single-orchestrator", "fail-closed"],
+  "config_file": "agents.config.json",
+  "editables": ["manifest.json", "index.ts", "config.ts", "handoff.ts", "ejecucion.ts"],
+  "cli": ["agents list", "agents add <id> <rol>", "agents pause <id> [activo|pausado]", "agents skill <id> <skill>", "agents link <de> <a> [tipo]"]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "axiom-harness",
+  "version": "0.9.31",
+  "type": "module",
+  "description": "Axiom IDE harness A2: preset SpecKit + spec/plan/tasks/verify/run",
+  "bin": {
+    "axiom": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/*.test.js",
+    "dev": "npx tsx src/cli.ts",
+    "lint:spectral": "spectral lint openapi.json -r .spectral.json"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@stoplight/spectral-cli": "6.17.0",
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.3"
+  }
+}

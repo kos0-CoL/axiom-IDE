@@ -1,0 +1,17 @@
+{
+  "name": "telegram",
+  "version": "0.3.0",
+  "scope": "global",
+  "default": true,
+  "description": "Módulo Telegram por defecto: transporte de notificaciones y aprobaciones. No otorga permisos; decide el broker. Se configura desde el propio módulo (telegram allow|unallow|expira|config).",
+  "contracts": ["broker.check", "broker.decide"],
+  "transports": ["cli", "telegram-callback", "polling", "webhook"],
+  "patterns": ["first-response-wins", "single-use-callback", "fail-closed", "allow-once"],
+  "config_file": "telegram.config.json",
+  "configurables": ["allowlist", "expiracionMin"],
+  "editables": ["manifest.json", "index.ts", "config.ts", "adapter.ts", "auth.ts", "bot.ts", "transport.ts"],
+  "cli": ["telegram allow <chat-id>", "telegram unallow <chat-id>", "telegram expira <minutos>", "telegram config", "telegram notify <tool> [chat-id]", "telegram send <chat-id> <texto>", "telegram bot [--once]", "telegram webhook <https-url> [--secret S]"],
+  "env": ["AXIOM_TELEGRAM_BOT_TOKEN", "AXIOM_TELEGRAM_WEBHOOK_SECRET"],
+  "webhook_route": "POST /api/telegram/webhook (header x-telegram-bot-api-secret-token si hay secreto)",
+  "callback_data": "approve:<id> | reject:<id> (<=64 bytes, single-use, primera respuesta gana)"
+}

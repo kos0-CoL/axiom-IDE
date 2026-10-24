@@ -1,0 +1,19 @@
+{
+  "name": "grafos",
+  "version": "0.1.0",
+  "scope": "global",
+  "default": false,
+  "description": "Grafo planeado vs ejecutado (intended: agents.config.json; executed: handoffs + evidences). Compara diseño con realidad observada.",
+  "contracts": ["grafos.intended", "grafos.executed"],
+  "transports": [
+    "cli",
+    "web"
+  ],
+  "patterns": [
+    "fail-closed"
+  ],
+  "config_file": "grafos.config.json",
+  "panel": { "tipo": "grafo" },
+  "editables": ["manifest.json", "index.ts", "config.ts"],
+  "cli": ["grafos ver"]
+}

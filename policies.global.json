@@ -1,0 +1,11 @@
+{
+  "tools": {
+    "terminal": false,
+    "delega": true
+  },
+  "techo": {
+    "rondas": 3,
+    "tokens": 100000,
+    "calls": 500
+  }
+}

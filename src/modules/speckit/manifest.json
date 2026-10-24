@@ -1,0 +1,19 @@
+{
+  "name": "speckit",
+  "version": "0.1.0",
+  "scope": "global",
+  "default": false,
+  "description": "Converge SDD: compara specs y tareas con su evidencia pass (solo lectura). Inspirado en GitHub Spec Kit. Valida convergencia spec-tasks-evidences.",
+  "contracts": ["speckit.converge"],
+  "transports": [
+    "cli",
+    "web"
+  ],
+  "patterns": [
+    "fail-closed"
+  ],
+  "config_file": "speckit.config.json",
+  "panel": { "tipo": "lista" },
+  "editables": ["manifest.json", "index.ts", "config.ts"],
+  "cli": ["speckit converge"]
+}
