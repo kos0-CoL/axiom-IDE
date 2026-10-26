@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openDb } from "./store.js";
 
@@ -33,6 +33,8 @@ ${s.cuerpo}
 - Cada afirmación acompañada de su evidencia o criterio de aceptación.
 `;
 }
+
+
 
 function readmeDefecto(nom: string): string {
   return `# ${nom}
@@ -127,7 +129,9 @@ export function leerRecientes(): string[] {
   try {
     const j = JSON.parse(readFileSync(recientesPath(), "utf8")) as unknown;
     if (!Array.isArray(j)) return [];
-    return j.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, MAX_RECIENTES);
+    // Las rutas que ya no existen se descartan: no deben ocupar cupo del tope ni
+    // ensuciar el árbol (quedan de pruebas viejas o de carpetas borradas a mano).
+    return j.filter((x): x is string => typeof x === "string" && x.length > 0 && existsSync(x)).slice(0, MAX_RECIENTES);
   } catch {
     return [];
   }
@@ -141,6 +145,39 @@ export function recordar(path: string): string[] {
     /* mejor esfuerzo */
   }
   return lista;
+}
+
+// Quitar de la lista (no toca el disco): el proyecto deja de aparecer en el árbol
+// pero se puede volver a abrir escribiendo su ruta.
+export function olvidarProyecto(path: string): { ok: true; recientes: string[] } | { ok: false; error: string } {
+  const abs = resolve(String(path ?? "").trim());
+  const lista = leerRecientes();
+  if (!lista.includes(abs)) return { ok: false, error: `no está en la lista de proyectos: ${abs}` };
+  const nueva = lista.filter((x) => x !== abs);
+  try {
+    writeFileSync(recientesPath(), JSON.stringify(nueva, null, 2) + "\n", { mode: 0o600 });
+  } catch (e) {
+    return { ok: false, error: `no se pudo actualizar la lista: ${e instanceof Error ? e.message : e}` };
+  }
+  return { ok: true, recientes: nueva };
+}
+
+// Borrar del disco. Solo proyectos de la lista de recientes, nunca el activo, el
+// directorio personal, la raíz ni el directorio desde el que corre el servidor.
+export function borrarProyecto(path: string, activo: string): { ok: true; path: string } | { ok: false; error: string } {
+  const abs = resolve(String(path ?? "").trim());
+  const protegidas = new Set(["/", resolve(homedir()), resolve(process.cwd())]);
+  if (protegidas.has(abs)) return { ok: false, error: `ruta protegida, no se borra: ${abs}` };
+  if (abs === resolve(String(activo ?? "").trim())) return { ok: false, error: "es el proyecto activo; activa otro antes de borrarlo" };
+  if (!leerRecientes().includes(abs)) return { ok: false, error: `solo se borran proyectos de la lista: ${abs}` };
+  if (!existsSync(join(abs, "axiom.json"))) return { ok: false, error: `no parece un proyecto axiom (falta axiom.json): ${abs}` };
+  try {
+    rmSync(abs, { recursive: true, force: true });
+  } catch (e) {
+    return { ok: false, error: `no se pudo borrar: ${e instanceof Error ? e.message : e}` };
+  }
+  olvidarProyecto(abs);
+  return { ok: true, path: abs };
 }
 
 export function validarRutaProyecto(p: unknown): { ok: true; path: string } | { ok: false; error: string } {

@@ -20,7 +20,7 @@ import { listarModulos, moduloActivo, nombresConocidos, crearModulo, regenModulo
 import { listarSesiones, obtenerSesion, mensajesDe, guardarMensaje, crearSesion, renombrarSesion, archivarSesion, borrarSesion, guardarPropuesta, aprobarPropuesta, promptPara, esTrivial, contextoSesion, usoSesion } from "./sessions.js";
 import { aplicarBuildPropuesta, contextoPlanAprobado, contextoWorkspace, guardarArtefactosPlan, guardarBuildPropuesta, obtenerBuildPropuesta, parseBuildChanges } from "./chat-build.js";
 import { archivosFueraDeAllow, leerAllow, matchAllow, validarArchivos, agregarAllow, quitarAllow, resetAllow } from "./staging.js";
-import { validarRutaProyecto, crearProyecto, asegurarProyecto, baseProyectos, leerRecientes, recordar } from "./proyectos.js";
+import { validarRutaProyecto, crearProyecto, asegurarProyecto, baseProyectos, leerRecientes, recordar, olvidarProyecto, borrarProyecto } from "./proyectos.js";
 import { textoExperiencia, textoPropuestas, verPropuesta, decidirPropuesta } from "./experience.js";
 import { fetchUpdates, tokenFromEnv, webhookSecretFromEnv, parseUpdate } from "./modules/telegram/transport.js";
 import { routeText, handleUpdate, deliver } from "./modules/telegram/bot.js";
@@ -62,7 +62,7 @@ const SCRIPT = [  "function esc(s){return String(s).replace(/&/g,'&amp;').replac
 "function sesborradef(s){var fila=axmodal('Borrar definitivamente','Se borrarán la sesión «'+s.titulo+'» ARCHIVADA, sus mensajes y las specs generadas por esta sesión (incluidas sus carpetas en specs/active/). Esta acción no se puede deshacer.');axbtn(fila,'Borrar definitivamente',function(){fila._cerrar();sesaction(s.id,'borrar');},true);axbtn(fila,'Cancelar',function(){fila._cerrar();});}",
 "function fdefechas(iso){if(!iso)return '';var d=new Date(iso);return isNaN(d.getTime())?'':d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});}",
 "var arbolPapelera=false;function papeleraToggle(){arbolPapelera=!arbolPapelera;var b=document.getElementById('btnpapelera');if(b)b.classList.toggle('on',arbolPapelera);renderArbol();}","var arbolData=[];function arbol(){fetch('api/arbol').then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error||'No se pudo cargar el árbol');arbolData=d.proyectos||[];renderArbol();}).catch(function(e){errbox('seslist',e);});}",
-"function renderArbol(){var box=document.getElementById('seslist');if(!box)return;var prev={};Array.prototype.forEach.call(box.querySelectorAll('details[data-proy]'),function(d){prev[d.getAttribute('data-proy')]=d.open;});var q=(document.getElementById('proybuscar').value||'').toLowerCase();box.innerHTML='';if(!arbolData.length){box.innerHTML='<div class=\"hint\">Sin proyectos todavía: botón + para crear el primero.</div>';return;}var total=0;arbolData.forEach(function(p){var ses=p.sesiones||[];if(arbolPapelera){ses=ses.filter(function(s){return s.archivada;});if(q){ses=ses.filter(function(s){return (s.titulo+' '+s.id).toLowerCase().indexOf(q)>=0;});}}else if(q){var filtradas=ses.filter(function(s){return (s.titulo+' '+s.id).toLowerCase().indexOf(q)>=0;});if(!filtradas.length&&(p.nombre||'').toLowerCase().indexOf(q)<0)return;ses=filtradas;}else{ses=ses.filter(function(s){return !s.archivada;});if(!ses.length&&p.activo===false)return;}var det=document.createElement('details');det.setAttribute('data-proy',p.path);det.open=q?true:(p.activo?true:Object.prototype.hasOwnProperty.call(prev,p.path)?prev[p.path]:false);var sum=document.createElement('summary');var dot=document.createElement('span');dot.className='dot';if(!p.activo)dot.style.background='var(--dim)';var nom=document.createElement('b');nom.textContent=p.nombre||p.path;nom.title=p.path;sum.appendChild(dot);sum.appendChild(nom);if(!p.activo){var act=document.createElement('button');act.className='mini';act.textContent='usar';act.title='Activar este proyecto';act.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();proyusar(p.path);});sum.appendChild(act);}det.appendChild(sum);if(!ses.length){var vacio=document.createElement('div');vacio.className='hint';vacio.style.marginLeft='10px';vacio.textContent=arbolPapelera?'La papelera está vacía.':(q?'Sin chats que Coincidan.':'Sin chats. Con «Nuevo chat» creas uno.');det.appendChild(vacio);}ses.forEach(function(s){total++;var row=document.createElement('div');row.className='sesrow';var b=document.createElement('button');b.className='ses'+(s.id===sesionActual?' on':'');b.textContent=s.titulo;b.title=s.titulo+' · '+s.modo+' · '+fdefechas(s.updated_at);b.onclick=function(){if(s.id===sesionActual){nav('chat');return;}if(p.activo)sesopen(s.id);else proyusarYabrir(p.path,s.id);};var menu=document.createElement('button');menu.className='mini';menu.textContent='⋯';menu.title='Enviar a papelera, renombrar, restaurar o borrar definitivamente';menu.onclick=function(){sesmenu(s);};row.appendChild(b);row.appendChild(menu);det.appendChild(row);});box.appendChild(det);});if(!total&&!q&&!arbolPapelera){box.insertAdjacentHTML('beforeend','<div class=\"hint\">Sin chats todavía: «Nuevo chat» crea el primero.</div>');}}",
+"function renderArbol(){var box=document.getElementById('seslist');if(!box)return;var prev={};Array.prototype.forEach.call(box.querySelectorAll('details[data-proy]'),function(d){prev[d.getAttribute('data-proy')]=d.open;});var q=(document.getElementById('proybuscar').value||'').toLowerCase();box.innerHTML='';if(!arbolData.length){box.innerHTML='<div class=\"hint\">Sin proyectos todavía: botón + para crear el primero.</div>';return;}var total=0;arbolData.forEach(function(p){var ses=p.sesiones||[];if(arbolPapelera){ses=ses.filter(function(s){return s.archivada;});if(q){ses=ses.filter(function(s){return (s.titulo+' '+s.id).toLowerCase().indexOf(q)>=0;});}}else if(q){var filtradas=ses.filter(function(s){return (s.titulo+' '+s.id).toLowerCase().indexOf(q)>=0;});if(!filtradas.length&&(p.nombre||'').toLowerCase().indexOf(q)<0)return;ses=filtradas;}else{ses=ses.filter(function(s){return !s.archivada;});}var det=document.createElement('details');det.setAttribute('data-proy',p.path);det.open=q?true:(p.activo?true:Object.prototype.hasOwnProperty.call(prev,p.path)?prev[p.path]:false);var sum=document.createElement('summary');var dot=document.createElement('span');dot.className='dot';if(!p.activo)dot.style.background='var(--dim)';var nom=document.createElement('b');nom.textContent=p.nombre||p.path;nom.title=p.path;sum.appendChild(dot);sum.appendChild(nom);if(!p.activo){var act=document.createElement('button');act.className='mini';act.textContent='usar';act.title='Activar este proyecto';act.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();proyusar(p.path);});sum.appendChild(act);}var pm=document.createElement('button');pm.className='mini';pm.textContent='⋯';pm.title='Abrir, quitar de la lista o borrar este proyecto';pm.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();proymenu(p);});sum.appendChild(pm);det.appendChild(sum);if(!ses.length){var vacio=document.createElement('div');vacio.className='hint';vacio.style.marginLeft='10px';vacio.textContent=arbolPapelera?'La papelera está vacía.':(q?'Sin chats que Coincidan.':'Sin chats. Con «Nuevo chat» creas uno.');det.appendChild(vacio);}ses.forEach(function(s){total++;var row=document.createElement('div');row.className='sesrow';var b=document.createElement('button');b.className='ses'+(s.id===sesionActual?' on':'');b.textContent=s.titulo;b.title=s.titulo+' · '+s.modo+' · '+fdefechas(s.updated_at);b.onclick=function(){if(s.id===sesionActual){nav('chat');return;}if(p.activo)sesopen(s.id);else proyusarYabrir(p.path,s.id);};var menu=document.createElement('button');menu.className='mini';menu.textContent='⋯';menu.title='Enviar a papelera, renombrar, restaurar o borrar definitivamente';menu.onclick=function(){sesmenu(s);};row.appendChild(b);row.appendChild(menu);det.appendChild(row);});box.appendChild(det);});if(!total&&!q&&!arbolPapelera){box.insertAdjacentHTML('beforeend','<div class=\"hint\">Sin chats todavía: «Nuevo chat» crea el primero.</div>');}}",
 "function sesrender(){renderArbol();}",
 "function ProyusarYabrir(ruta,id){fetch('api/proyecto/usar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:ruta})}).then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error||d.msg);sesopen(id);arbol();specsload();}).catch(function(e){sysline('No se pudo activar el proyecto: '+e.message);});}",
 "function renderSpecsBox(specs){var box=document.getElementById('specslist');if(!box)return;box.innerHTML='';if(!specs.length){box.innerHTML='<div class=\"hint\">Todavía no hay specs guardadas en este proyecto. Al aprobar un plan se escriben aquí.</div>';return;}specs.forEach(function(sp){var det=document.createElement('details');var sum=document.createElement('summary');var nb=document.createElement('b');nb.textContent=sp.id;sum.appendChild(nb);if(sp.proveedor){var pv=document.createElement('span');pv.textContent=sp.proveedor+(sp.model?' · '+sp.model:'');var todo='Generada con '+sp.proveedor+(sp.model?' / '+sp.model:'—');if(sp.plan_proveedor&&sp.plan_proveedor!==sp.proveedor)todo+=String.fromCharCode(10)+'Plan generado con '+sp.plan_proveedor+(sp.plan_model?' / '+sp.plan_model:'—');pv.title=todo;pv.style.overflow='hidden';pv.style.textOverflow='ellipsis';pv.style.whiteSpace='nowrap';pv.style.maxWidth='92px';pv.style.fontSize='11px';pv.style.color='var(--lila)';sum.appendChild(pv);}var meta=document.createElement('span');meta.textContent=fdefechas(sp.modificado);meta.style.marginLeft='auto';meta.style.color='var(--dim)';meta.style.fontSize='11px';sum.appendChild(meta);det.appendChild(sum);if(sp.proveedor){var genline=document.createElement('div');genline.textContent='Generada con: '+sp.proveedor+(sp.model?' / '+sp.model:'—');genline.style.margin='6px 0 0 10px';genline.style.fontSize='11px';genline.style.color='var(--lila)';det.appendChild(genline);}if(sp.plan_proveedor&&!sp.proveedor){var pv=document.createElement('div');pv.textContent='plan: '+sp.plan_proveedor+(sp.plan_model?' · '+sp.plan_model:'');pv.style.margin='0 0 0 10px';pv.style.fontSize='11px';pv.style.color='var(--lila)';det.appendChild(pv);}(sp.archivos||[]).forEach(function(a){var et=document.createElement('div');et.style.margin='6px 0 0 10px';var lbl=document.createElement('b');lbl.style.fontSize='11px';lbl.textContent=a.nombre+' · '+(a.bytes|0)+' caracteres';et.appendChild(lbl);var pre=document.createElement('pre');pre.textContent=(a.head||'')+(a.bytes>700?String.fromCharCode(10)+'… (recortado)':'');et.appendChild(pre);det.appendChild(et);});box.appendChild(det);});}",
@@ -152,6 +152,9 @@ const SCRIPT = [  "function esc(s){return String(s).replace(/&/g,'&amp;').replac
 
 "function proyusar(ruta){fetch('api/proyecto/usar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:ruta})}).then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error||d.msg);recargarProyecto(d.root||ruta,'Proyecto activo: '+(d.root||ruta));}).catch(function(e){alert(e.message);});}",
 "function proyusarYabrir(ruta,sesId){fetch('api/proyecto/usar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:ruta})}).then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error||d.msg);recargarProyecto(d.root||ruta,'Proyecto activo: '+(d.root||ruta));arbolData=arbolData.map(function(p){if(p.path===ruta)p.activo=true;return p;});renderArbol();sesopen(sesId);nav('chat');}).catch(function(e){alert(e.message);});}",
+"function proymenu(p){var fila=axmodal('Acciones de proyecto','Proyecto «'+(p.nombre||p.path)+'»'+(p.activo?' (activo)':'')+' · '+p.path);if(!p.activo){axbtn(fila,'Abrir este proyecto',function(){fila._cerrar();proyusar(p.path);});}axbtn(fila,'Quitar de la lista',function(){fila._cerrar();proyquitar(p);});if(!p.activo){axbtn(fila,'Borrar del disco…',function(){fila._cerrar();proyborrar(p);},true);}axbtn(fila,'Cancelar',function(){fila._cerrar();});}",
+"function proyquitar(p){fetch('api/proyecto/quitar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p.path})}).then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error||d.msg);sesionActual='';sesionesCache=[];arbol();seslist();sysline('Proyecto quitado de la lista (sigue en disco): '+p.path);}).catch(function(e){sysline('No se pudo quitar el proyecto: '+e.message);});}",
+"function proyborrar(p){axconfirm('Borrar proyecto del disco','Se eliminará la carpeta completa: '+p.path+' — con sus specs, agentes, sesiones de chat y todo el código del proyecto. No se puede deshacer.','Borrar definitivamente',function(){fetch('api/proyecto/borrar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p.path,confirm:true})}).then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error||d.msg);arbol();sysline('Proyecto borrado: '+p.path);}).catch(function(e){sysline('No se pudo borrar el proyecto: '+e.message);});},true);}",
 "function recargarProyecto(root,mensaje){sesionActual='';sesionesCache=[];chatlimpia();proy();seslist();cfgload();chatprov();skilload();handoffsload();modload();modnav();load();sysline(mensaje);arbol();specsload();}",
 "document.addEventListener('keydown',function(e){if(e.key==='Escape'){var t=document.getElementById('ayuda-pop');if(t)t.remove();}});",
 "function handoffsload(){fetch('api/agents/handoffs').then(function(r){return r.json();}).then(function(d){document.getElementById('holog').textContent=(d.handoffs||[]).map(function(h){return h.de+' → '+h.a+': '+h.tarea+' ['+h.decision+']';}).join('\\n')||'Sin handoffs.';});}",
@@ -702,6 +705,14 @@ async function handleSpecs(root: string, res: ServerResponse): Promise<void> {
   json(res, 200, { ok: true, active: root, specs: out });
 }
 
+// Antes de cambiar de proyecto se recuerda el actual: así el anterior sigue en el
+// árbol y siempre se puede volver a él (incluido el que arrancó el servidor).
+function recordarActivo(root: string): void {
+  try {
+    if (existsSync(join(root, "axiom.json"))) recordar(root);
+  } catch { /* raíz ilegible: se omite sin romper el cambio de proyecto */ }
+}
+
 async function handleProyecto(root: string, req: any, res: any): Promise<string | null> {
   const { pathname } = parseUrl(req.url ?? "");
   if (req.method === "GET" && pathname === "/api/proyecto") {
@@ -712,6 +723,7 @@ async function handleProyecto(root: string, req: any, res: any): Promise<string 
     const body = await readBody(req);
     const { nombre, plantilla, base: baseInput } = body ?? {};
     const base = typeof (baseInput ?? plantilla) === "string" && String(baseInput ?? plantilla).trim() ? String(baseInput ?? plantilla).trim() : baseProyectos();
+    recordarActivo(root);
     const r = crearProyecto(base, nombre);
     json(res, r.ok ? 200 : 400, r.ok ? { ok: true, root: r.path, path: r.path, msg: r.path } : { ok: false, error: r.error, msg: r.error });
     return r.ok ? r.path : null;
@@ -721,11 +733,32 @@ async function handleProyecto(root: string, req: any, res: any): Promise<string 
     const { nombre, path } = body ?? {};
     const ruta = path ?? nombre;
     if (!ruta) { json(res, 400, { ok: false, error: "path requerido" }); return null; }
+    const previa = validarRutaProyecto(ruta);
+    if (previa.ok && previa.path !== root) recordarActivo(root);
     const r = usarProyecto(root, ruta);
     const ok = r.startsWith("proyecto activado");
     const activo = validarRutaProyecto(ruta);
     json(res, ok ? 200 : 400, ok ? { ok: true, root: activo.ok ? activo.path : ruta, msg: r } : { ok: false, error: r, msg: r });
     return ok && activo.ok ? activo.path : null;
+  }
+  // Quitar de la lista: el proyecto sigue en disco, solo deja de salir en el árbol.
+  if (req.method === "POST" && pathname === "/api/proyecto/quitar") {
+    const body = await readBody(req);
+    const ruta = body?.path ?? body?.nombre;
+    if (!ruta) { json(res, 400, { ok: false, error: "path requerido" }); return null; }
+    const r = olvidarProyecto(String(ruta));
+    json(res, r.ok ? 200 : 400, r.ok ? { ok: true, recientes: r.recientes, msg: "proyecto quitado de la lista" } : { ok: false, error: r.error, msg: r.error });
+    return null;
+  }
+  // Borrar del disco: exige confirmación en el cliente y nunca toca el proyecto activo.
+  if (req.method === "POST" && pathname === "/api/proyecto/borrar") {
+    const body = await readBody(req);
+    const ruta = body?.path ?? body?.nombre;
+    if (!ruta) { json(res, 400, { ok: false, error: "path requerido" }); return null; }
+    if (body?.confirm !== true) { json(res, 400, { ok: false, error: "confirm: true requerido para borrar del disco" }); return null; }
+    const r = borrarProyecto(String(ruta), root);
+    json(res, r.ok ? 200 : 400, r.ok ? { ok: true, path: r.path, msg: `proyecto borrado: ${r.path}` } : { ok: false, error: r.error, msg: r.error });
+    return null;
   }
   json(res, 404, { ok: false, error: "Not found" });
   return null;
@@ -1306,7 +1339,7 @@ export function startWeb(root: string, port: number): {port:number;close:()=>voi
       if(pathname==="/api/decide"){await handleDecide(root,req,res);return;}
 
       // Proyecto
-      if(pathname==="/api/proyecto" || pathname==="/api/proyecto/crear" || pathname==="/api/proyecto/usar"){const seleccionado=await handleProyecto(root,req,res);if(seleccionado)root=seleccionado;return;}
+      if(pathname==="/api/proyecto" || pathname==="/api/proyecto/crear" || pathname==="/api/proyecto/usar" || pathname==="/api/proyecto/quitar" || pathname==="/api/proyecto/borrar"){const seleccionado=await handleProyecto(root,req,res);if(seleccionado)root=seleccionado;return;}
 
       // Árbol jerárquico: proyecto activo + recientes, cada uno con sus chats.
       if(req.method==="GET" && pathname==="/api/arbol"){await handleArbol(root,res);return;}
