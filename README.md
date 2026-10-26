@@ -249,6 +249,10 @@ La web solo muestra presencia ("guardada" / "ausente"); los valores nunca se ree
   declarada se deniega**. `ask` del agente abre una aprobación; al **aprobarla** se relee
   su declaración: un `deny` posterior la cierra como `denegada-por-agente`. Rechazar no
   revalida cotas (no concede nada): queda registrada como `rechazada` con quien la rechazó.
+  Un config anterior a esta cota (`config_version` ausente) se migra al cargar: quien
+  tiene aristas de delegación o escala recibe `delega=allow`, el archivo queda sellado en
+  `config_version: 2` y la migración no se repite. Un `deny` explícito no se toca, y a
+  partir de ahí la ausencia de `delega` vuelve a denegar el handoff.
 - **`delega`** es la herramienta del handoff: la declara el agente que delega y el broker la
   autoriza con él. Los alias históricos se normalizan (`read`→`leer`, `terminal`→`ejecutar`).
 - **Riesgo alto** (terminal, publish, network) → `ask`: requiere aprobación humana, aquí o por Telegram.

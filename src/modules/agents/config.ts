@@ -39,6 +39,9 @@ export const Arista = z.object({
 export type Arista = z.infer<typeof Arista>;
 
 export const AgentsConfig = z.object({
+  // Versión del formato. <2 = config de antes de que el broker cruzara la
+  // declaración del agente: se migra una sola vez y se sella en 2 (ver loadAgents).
+  config_version: z.number().int().min(1).max(99).optional(),
   agentes: z.array(Agente).default([]),
   aristas: z.array(Arista).default([]),
 });
@@ -92,7 +95,7 @@ function mensajeZod(error: z.ZodError): string {
 // El grafo por defecto sale de la semilla única (seed.ts), la misma que usa el
 // esqueleto de proyecto: antes eran dos listas distintas y divergían.
 function defecto(): AgentsConfig {
-  return rosterSemilla();
+  return { ...rosterSemilla(), config_version: 2 };
 }
 
 // Tipos de arista que sembró un esqueleto viejo con valores inválidos.
@@ -114,6 +117,41 @@ function repararTiposLegado(cfg: unknown): boolean {
   return tocada;
 }
 
+// Migración: antes de que el broker cruzara la declaración del agente, delegar no
+// se declaraba (el esqueleto escribía `herramientas: []`). Ahora el handoff exige
+// `delega` declarada en quien delega, así que un config anterior denegaría todos
+// los handoffs. Al cargarlo (una sola vez: el config queda sellado en
+// `config_version: 2`) se añade `delega=allow` a quien tiene aristas de delegación
+// o escala y no la declara; un `deny` explícito no se toca.
+function migrarDeclaracionDelega(cfg: unknown): boolean {
+  const j = cfg as { agentes?: unknown; aristas?: unknown } | null;
+  if (!j || typeof j !== "object" || !Array.isArray(j.agentes) || !Array.isArray(j.aristas)) return false;
+  const delegan = new Set<string>();
+  for (const a of j.aristas) {
+    const e = a as { de?: unknown; tipo?: unknown } | null;
+    if (!e || typeof e !== "object" || typeof e.de !== "string") continue;
+    if (e.tipo === "delega" || e.tipo === "escala") delegan.add(e.de);
+  }
+  if (!delegan.size) return false;
+  let tocada = false;
+  for (const a of j.agentes) {
+    const ag = a as { id?: unknown; herramientas?: unknown } | null;
+    if (!ag || typeof ag !== "object" || typeof ag.id !== "string" || !delegan.has(ag.id)) continue;
+    // Si `herramientas` existe pero no es una lista, el config está roto por otra
+    // razón: no se reemplaza (se dejaría al loader validarlo y decirlo).
+    if (ag.herramientas !== undefined && !Array.isArray(ag.herramientas)) continue;
+    const propias = Array.isArray(ag.herramientas) ? ag.herramientas : [];
+    const declara = propias.some((h) => {
+      const t = h as { tool?: unknown } | null;
+      return !!t && typeof t === "object" && typeof t.tool === "string" && t.tool.trim().toLowerCase() === "delega";
+    });
+    if (declara) continue;
+    ag.herramientas = [...propias, { tool: "delega", acceso: "allow" }];
+    tocada = true;
+  }
+  return tocada;
+}
+
 // Escritura atómica: evita que un lector concurrente vea un JSON a medio escribir
 // (importante cuando dos procesos reparan el config legado a la vez).
 function escribirAtomico(p: string, contenido: string): void {
@@ -129,21 +167,38 @@ export function loadAgents(root: string): { ok: true; config: AgentsConfig; defe
     const original = readFileSync(p, "utf8");
     const piolin = JSON.parse(original) as unknown;
     let reparado = false;
-    let r = AgentsConfig.safeParse(piolin);
-    if (!r.success && piolin && typeof piolin === "object" && !Array.isArray(piolin)) {
+    let parsed = AgentsConfig.safeParse(piolin);
+    if (!parsed.success && piolin && typeof piolin === "object" && !Array.isArray(piolin)) {
       reparado = repararTiposLegado(piolin);
-      if (reparado) r = AgentsConfig.safeParse(piolin);
+      if (reparado) parsed = AgentsConfig.safeParse(piolin);
     }
-    if (!r.success) return { ok: false, error: `agents.config.json inválido: ${mensajeZod(r.error)}` };
+    if (!parsed.success) return { ok: false, error: `agents.config.json inválido: ${mensajeZod(parsed.error)}` };
     // Valida que las aristas apunten a agentes existentes.
-    const ids = new Set(r.data.agentes.map((a) => a.id));
-    const rota = r.data.aristas.findIndex((a) => !ids.has(a.de) || !ids.has(a.a));
+    const ids = new Set(parsed.data.agentes.map((a) => a.id));
+    const rota = parsed.data.aristas.findIndex((a) => !ids.has(a.de) || !ids.has(a.a));
     if (rota >= 0) {
-      const e = r.data.aristas[rota];
+      const e = parsed.data.aristas[rota];
       const causa = !ids.has(e.de) ? "origen inexistente" : "destino inexistente";
       return { ok: false, error: `aristas[${rota}] rota (${causa}): ${e.de} → ${e.a}` };
     }
-    if (reparado) {
+    // Migración de una sola vez: un config sin `config_version` (o <2) es anterior
+    // a la cota del agente y se sella en 2. Después, la ausencia de `delega` vuelve
+    // a significar lo que dice el modelo: no declarado = denegado. Se aplica sobre
+    // el JSON crudo y se relee, porque zod descarta las claves que no conoce
+    // (p. ej. `nombre`) y persistir parsed.data borraría lo escrito por el usuario.
+    const version = typeof (piolin as { config_version?: unknown } | null)?.config_version === "number"
+      ? (piolin as { config_version: number }).config_version
+      : 1;
+    const legado = version < 2;
+    const migrado = legado ? migrarDeclaracionDelega(piolin) : false;
+    if (legado) (piolin as { config_version?: number }).config_version = 2;
+    let config = parsed.data;
+    if (legado) {
+      const relectura = AgentsConfig.safeParse(piolin);
+      if (!relectura.success) return { ok: false, error: `migración de delega inválida: ${mensajeZod(relectura.error)}` };
+      config = relectura.data;
+    }
+    if (reparado || legado) {
       // Persiste el config corregido la primera vez. CAS: si otro proceso cambió
       // el archivo mientras reparábamos, no pisamos su versión (evita clobber y
       // escrituras entrelazadas). Escritura atómica (tmp + rename) para que nadie
@@ -155,9 +210,9 @@ export function loadAgents(root: string): { ok: true; config: AgentsConfig; defe
           escribirAtomico(p, JSON.stringify(piolin, null, 2) + "\n");
         }
       } catch { /* la carga en memoria ya quedó reparada */ }
-      return { ok: true, config: r.data, defecto: false, reparado: true };
+      return { ok: true, config, defecto: false, reparado: reparado || migrado ? true : undefined };
     }
-    return { ok: true, config: r.data, defecto: false };
+    return { ok: true, config, defecto: false };
   } catch (e) {
     return { ok: false, error: `agents.config.json ilegible: ${e instanceof Error ? e.message : e}` };
   }

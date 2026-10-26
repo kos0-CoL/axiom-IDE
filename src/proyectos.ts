@@ -74,7 +74,8 @@ function agentsConfigDefecto(nom: string): Record<string, unknown> {
   // Misma semilla que usa el loader sin agents.config.json (seed.ts): un proyecto
   // nuevo y un proyecto sin config ya no cargan grafos distintos.
   const roster = rosterSemilla();
-  return { nombre: nom, agentes: roster.agentes, aristas: roster.aristas };
+  // config_version 2: el esqueleto ya declara herramientas, no necesita migración.
+  return { config_version: 2, nombre: nom, agentes: roster.agentes, aristas: roster.aristas };
 }
 const MAX_RECIENTES = 10;
 
