@@ -2,6 +2,9 @@
 // El orquestador delega según el grafo; cada nodo ejecuta con su config (modelo, skills, instrucciones).
 import { loadAgents } from "./config.js";
 import { cuerpoSkill } from "./skills.js";
+// El proyecto puede sobreescribir un skill en skills/<id>/SKILL.md; el prompt
+// debe recibir esa versión, no la del catálogo, o el panel mentiría.
+import { cuerpoEfectivo } from "../skills/index.js";
 import { BASELINE_INYECCION } from "./defensa.js";
 import { spawn, SpawnResult } from "../../adapters.js";
 import { openDb } from "../../store.js";
@@ -48,11 +51,11 @@ function cargarGrafo(root: string): GrafoAgentes | { error: string } {
 
 // Construye el prompt para un agente según su configuración
 // (exportada para los tests: el prompt es contrato, no detalle interno).
-export function construirPromptAgente(agente: AgenteEjecutable, tarea: string, contexto: string, specTitulo: string): string {
+export function construirPromptAgente(agente: AgenteEjecutable, tarea: string, contexto: string, specTitulo: string, root?: string): string {
   const skillsNombres = agente.skills.length ? `\nSkills activos: ${agente.skills.join(", ")}` : "";
   const skillsCuerpos = agente.skills
     .map((s) => {
-      const c = cuerpoSkill(s);
+      const c = root ? cuerpoEfectivo(root, s) : cuerpoSkill(s);
       return c ? `\n--- skill: ${s} ---\n${c}` : "";
     })
     .filter(Boolean)
@@ -167,7 +170,7 @@ export async function ejecutarTareaGrafo(
   }
 
   // Paso 2: El delegado hace el trabajo
-  const promptTrabajo = construirPromptAgente(delegado, `${taskId} — ${taskTitle}`, scenario, specTitulo);
+  const promptTrabajo = construirPromptAgente(delegado, `${taskId} — ${taskTitle}`, scenario, specTitulo, root);
   const trabajoResult = await ejecutarAgente(root, delegado, promptTrabajo);
   
   if (!trabajoResult.ok) {

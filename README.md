@@ -70,6 +70,7 @@ axiom module compat
 |--------|---------|-------------|-----------|
 | `adapters` | 0.1.0 | Proveedor LLM conmutable (off/ollama/litellm/openai/anthropic/google/openrouter) | texto |
 | `agents` | 0.1.0 | Grafo de orquestación: orquestador, nodos, especializados, subagentes, skills | — |
+| `skills` | 0.1.0 | Catálogo editable: `skills/<id>/SKILL.md` sobreescribe el catálogo y alimenta el prompt | lista |
 | `grafos` | 0.1.0 | **Intended** (agents.config.json) vs **Executed** (handoffs + evidencias) | grafo |
 | `kanban` | 0.1.0 | Tablero de tareas por estado (SQLite `tasks` agrupadas en columnas) | lista |
 | `speckit` | 0.1.0 | Convergencia SDD: specs ↔ tasks ↔ evidencias pass | lista |
@@ -102,6 +103,25 @@ axiom agents define nodo-code presupuesto "50000:200"
 axiom agents handoff orquestador nodo-code "Implementar T1"
 axiom agents handoffs
 ```
+
+#### Skills con cuerpo
+
+El grafo referencia skills por id, pero un id suelto no instruye nada. El catálogo base vive en `src/modules/agents/skills.ts`: cada entrada tiene `id` (kebab-case), `descripcion` y `cuerpo`, validados con zod.
+
+- El prompt del agente recibe **el cuerpo** del skill (`cuerpoSkill`), no solo su nombre; los skills activos se anuncian por nombre y se expanden con su instrucción.
+- **Degradación graciosa**: un id sin cuerpo no rompe la carga; el agente ve el nombre y sigue. `check:seeds` rompe el build si un skill referenciado se queda sin cuerpo.
+- **Override por proyecto**: al crear/activar un proyecto se siembra `skills/<id>/SKILL.md`. Ese archivo **es** la versión que recibe el prompt (por encima del catálogo), así que editarlo desde Ajustes → Skills cambia el comportamiento del agente sin recompilar. Un skill nuevo, sin entrada en el catálogo, funciona igual en cuanto tiene archivo con cuerpo.
+- **Sin cuerpo, sin instrucción**: si el archivo existe pero no tiene cuerpo utilizable, el agente solo ve el nombre; Ajustes → Skills lo marca como *sin cuerpo*.
+
+### Skills (catálogo editable)
+
+```bash
+axiom skills                     # lista con origen: catálogo | override | propio
+axiom skills ver plan            # cuerpo efectivo (archivo del proyecto o catálogo)
+axiom skills borrar plan         # quita el override del proyecto; vuelve al catálogo
+```
+
+El catálogo de código es la base y `skills/<id>/SKILL.md` manda sobre él. La edición cómoda es **Ajustes → Skills**: lista cada skill con su origen y su estado, y permite ver y guardar id, descripción y cuerpo. La API hace lo mismo (`/api/skills`) para que el panel y el agente lean la misma fuente. Un id con carpeta de nombre inválido no se carga: se lista aparte como ignorado, sin adivinar.
 
 ### Grafos y speckit
 
@@ -149,6 +169,8 @@ La web no es una consola más: es el panel de control del harness. Incluye chat 
 | `/api/agents/handoff` | POST | Delegación con broker |
 | `/api/agents/experience` | GET | Lecciones aprendidas |
 | `/api/agents/snapshot` | GET | Snapshot de run |
+| `/api/skills` | GET | Catálogo + skills del proyecto, con su origen |
+| `/api/skills/{id}` | GET/POST/DELETE | Leer, guardar o quitar el archivo del proyecto |
 | `/api/secrets` | POST | Guarda secrets (atómico) |
 | `/api/decide` | POST | Broker decide (approve/reject) |
 | `/api/modulos` | GET/POST | Lista/activa módulos |
@@ -208,6 +230,7 @@ axiom/
 ├── project.json               # Config proyecto
 ├── modules.json               # Estado módulos
 ├── agents.config.json         # Grafo agentes
+├── skills/<id>/SKILL.md       # Skill del proyecto (sobreescribe el catálogo)
 ├── adapters.config.json       # Config LLM
 ├── telegram.config.json       # Config Telegram
 ├── openapi.json               # Spec del servidor web

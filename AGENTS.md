@@ -11,5 +11,6 @@ Reglas:
 - Boundaries en `scripts/check-boundaries.mjs`; cli.ts es composition root.
 - Specs en `specs/active/<id>/spec|plan|tasks|verification-*.md`; ADRs en `docs/decisions/`.
 - Modelo por agente: `axiom agents define <id> modelo <id-del-modelo|hereda-proveedor>`; el spawn lo usa y `hereda-proveedor` cae al modelo global.
+- Skills por proyecto: `skills/<id>/SKILL.md` sobreescribe el catálogo y es lo que recibe el prompt; `axiom skills` lista, ver/editar en Ajustes → Skills, `axiom skills borrar <id>` quita el override.
 - No commitear `node_modules/`, `dist/`, `*.db`. No secretos en capas/imágenes.
 - Doble eje en PR: Standards vs Spec, sin re-rankear.

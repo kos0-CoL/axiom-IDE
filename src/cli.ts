@@ -9,6 +9,7 @@ import { agentsText, addAgente, pausarAgente, skill as agentSkill, enlazar as ag
 import { configText as adaptersConfig, usarProveedor, ponerModelo, ponerUrl, ponerTimeoutMs, ponerMaxChars, spawn as adaptersSpawn, formatSpawn } from "./adapters.js";
 import { sandboxRun, sandboxSpec } from "./sandbox.js";
 import { listarModulos, moduloActivo, setModulo, setVista, textoModulos, textoSuperficie } from "./modulos.js";
+import { textoSkills, leerSkill, borrarSkill } from "./skills.js";
 void listarModulos;
 
 const rawArgs = process.argv.slice(2);
@@ -81,6 +82,22 @@ else if (cmd === "telegram" && rest[0] === "expira") { const m = setExpiracion(r
 else if (cmd === "telegram" && rest[0] === "config") { const m = configText(root); console.log(m); if (/inválido|ilegible/.test(m)) process.exit(1); }
 else if (cmd === "telegram" && (rest[0] === "on" || rest[0] === "off")) { const m = tgEnabled(root, rest[0]); console.log(m); if (/uso: axiom|inválida/.test(m)) process.exit(2); }
 else if (cmd === "telegram") { console.log(statusText(root)); }
+else if (cmd === "skills") {
+  if (!moduloActivo(root, "skills")) { console.error("módulo skills deshabilitado (fail closed): habilítalo con `axiom module on skills`"); process.exit(2); }
+  if (rest[0] === "ver") {
+    const r = leerSkill(root, rest[1] ?? "");
+    if (!r.ok) { console.error(r.error); process.exit(2); }
+    console.log(`${r.skill.id} [${r.skill.origen}] ${r.skill.descripcion}\n${r.skill.ruta}\n\n${r.skill.cuerpo}`);
+  } else if (rest[0] === "borrar") {
+    const r = borrarSkill(root, rest[1] ?? "");
+    console.log(r.ok ? r.msg : r.error);
+    if (!r.ok) process.exit(2);
+  } else if (rest[0] && rest[0] !== "list") {
+    console.error("uso: axiom skills [ver|borrar <id>]"); process.exit(2);
+  } else {
+    console.log(textoSkills(root));
+  }
+}
 else if (cmd === "agents" && rest[0] === "add") { const m = addAgente(root, rest[1], rest[2]); console.log(m); if (/uso: axiom|inválido|ya existe|inválida/.test(m)) process.exit(2); }
 else if (cmd === "agents" && rest[0] === "pause") { const m = pausarAgente(root, rest[1], rest[2]); console.log(m); if (/uso: axiom|inválido|no existe|inválida/.test(m)) process.exit(2); }
 else if (cmd === "agents" && rest[0] === "skill") { const m = agentSkill(root, rest[1], rest[2]); console.log(m); if (/uso: axiom|no existe|inválida/.test(m)) process.exit(2); }
@@ -122,4 +139,4 @@ else if (cmd === "validate-tokens") { cmdValidateTokens(rest[0]); }
 else if (cmd === "validate-openapi") { cmdValidateOpenApi(rest[0]); }
 else if (cmd === "sandbox") { const ii = rest.indexOf("--image"); const img = ii >= 0 ? rest[ii + 1] : undefined; const userCmd = ii >= 0 ? rest.filter((_, i) => i !== ii && i !== ii + 1) : rest.slice(); const out = await sandboxRun(root, userCmd.length ? userCmd : ["echo", "sandbox-ok"], img ? { image: img } : {}); console.log(out.out); process.exit(out.code); }
 else if (cmd === "cycle") { cmdCycle(root, rest[0]); }
-else { console.log("uso: axiom [--root <dir>] <init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi|sandbox> (verify: pass|fail|error [--detalle] [--archivos]) (run: [--dry-run] [--agente]) (telegram: notify|approve|reject|bloqueos|consumo|allow|unallow|expira|config|send|bot [--once]|webhook|on|off) (adapters: config|use|model|url|timeout|maxchars|spawn) (agents: list|add|pause|skill|link|define|handoff|handoffs|experience|proponer|propuestas|ver-propuesta|aprobar-propuesta|rechazar-propuesta|snapshot) (secrets: solo via web Configuración)"); process.exit(cmd ? 1 : 0); }
+else { console.log("uso: axiom [--root <dir>] <init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi|sandbox> (verify: pass|fail|error [--detalle] [--archivos]) (run: [--dry-run] [--agente]) (telegram: notify|approve|reject|bloqueos|consumo|allow|unallow|expira|config|send|bot [--once]|webhook|on|off) (adapters: config|use|model|url|timeout|maxchars|spawn) (skills: list|ver|borrar <id>) (agents: list|add|pause|skill|link|define|handoff|handoffs|experience|proponer|propuestas|ver-propuesta|aprobar-propuesta|rechazar-propuesta|snapshot) (secrets: solo via web Configuración)"); process.exit(cmd ? 1 : 0); }

@@ -51,6 +51,12 @@ const CATALOGO: Omit<ModuloInfo, "enabled" | "cableado" | "vista" | "superficie"
     configFile: "agents.config.json",
   },
   {
+    nombre: "skills",
+    version: "0.1.0",
+    descripcion: "Catálogo de skills editable: skills/<id>/SKILL.md sobreescribe el catálogo y es lo que recibe el prompt del agente.",
+    configFile: "skills.config.json",
+  },
+  {
     nombre: "grafos",
     version: "0.1.0",
     descripcion: "Grafo planeado vs ejecutado (intended: agents.config.json; executed: handoffs + evidences). Compara diseño con realidad observada.",

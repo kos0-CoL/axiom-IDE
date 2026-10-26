@@ -295,6 +295,253 @@
         }
       }
     },
+    "/api/skills": {
+      "get": {
+        "operationId": "skillsListar",
+        "summary": "Catálogo de skills y su origen",
+        "description": "Catálogo de código más los skills/<id>/SKILL.md del proyecto. origen: catalogo | override | proyecto.",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Skills disponibles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "skills"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "origen"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "descripcion": {
+                            "type": "string"
+                          },
+                          "origen": {
+                            "type": "string"
+                          },
+                          "enCatalogo": {
+                            "type": "boolean"
+                          },
+                          "tieneCuerpo": {
+                            "type": "boolean"
+                          },
+                          "override": {
+                            "type": "boolean"
+                          },
+                          "ruta": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "ignorados": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo skills deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "skillsLeer",
+        "summary": "Cuerpo efectivo de un skill",
+        "description": "Archivo del proyecto si existe; si no, catálogo. Incluye el crudo para el editor.",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "skill": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No existe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo skills deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "skillsGuardar",
+        "summary": "Crea o actualiza el skill en el proyecto (solo local)",
+        "description": "Escribe skills/<id>/SKILL.md. Un archivo con id del catálogo lo sobreescribe.",
+        "tags": [
+          "configuracion"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "descripcion",
+                  "cuerpo"
+                ],
+                "properties": {
+                  "descripcion": {
+                    "type": "string",
+                    "maxLength": 160
+                  },
+                  "cuerpo": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Guardado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Id, descripción o cuerpo inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo skills deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "skillsBorrar",
+        "summary": "Quita el archivo del proyecto (solo local)",
+        "description": "Borra skills/<id>/SKILL.md. Si el id existe en el catálogo, vuelve a su versión base.",
+        "tags": [
+          "configuracion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Borrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No hay override que borrar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo skills deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents": {
       "get": {
         "operationId": "agentsGrafo",

@@ -1,0 +1,14 @@
+{
+  "name": "skills",
+  "version": "0.1.0",
+  "scope": "global",
+  "default": true,
+  "description": "Catálogo de skills editable: cada skills/<id>/SKILL.md del proyecto sobreescribe el catálogo de código y es lo que recibe el prompt del agente. Estado y edición en Ajustes → Skills.",
+  "contracts": ["skills.catalogo"],
+  "transports": ["cli", "web"],
+  "patterns": ["single-source", "override-file", "fail-closed"],
+  "config_file": "skills.config.json",
+  "panel": { "tipo": "lista" },
+  "editables": ["manifest.json", "index.ts"],
+  "cli": ["skills", "skills ver <id>", "skills borrar <id>"]
+}

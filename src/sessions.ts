@@ -254,6 +254,8 @@ export function aprobarPropuesta(root: string, id: string): { ok: true; session_
 export interface ExtraPrompt {
   instrucciones?: string;
   historial?: string;
+  /** Descripción efectiva del skill (catálogo o archivo del proyecto). */
+  skillDescripcion?: string;
 }
 
 // P1 intent-gate (derroche PLAN en trivial): saludo/texto corto sin verbo de
@@ -269,7 +271,8 @@ export function esTrivial(texto: string): boolean {
 // El modo cambia el encargo al proveedor; la skill enfoca la respuesta. Sin herramientas reales aún (fase posterior).
 export function promptPara(modo: ModoChat, skill: string, texto: string, extra: ExtraPrompt = {}): string {
   const s = skill.trim().slice(0, 64);
-  const foco = s ? `[enfoque ${s}${SKILL_DESC[s] ? ` (${SKILL_DESC[s]})` : ""}]\n` : "";
+  const descSkill = extra.skillDescripcion ?? SKILL_DESC[s];
+  const foco = s ? `[enfoque ${s}${descSkill ? ` (${descSkill})` : ""}]\n` : "";
   const rol = (extra.instrucciones ?? "").trim().slice(0, 2000);
   const cab = rol ? `[rol]\n${rol}\n` : "";
   const hist = (extra.historial ?? "").trim().slice(0, 12000);

@@ -22,6 +22,7 @@ import { aplicarBuildPropuesta, contextoPlanAprobado, contextoWorkspace, guardar
 import { archivosFueraDeAllow, leerAllow, matchAllow, validarArchivos, agregarAllow, quitarAllow, resetAllow } from "./staging.js";
 import { validarRutaProyecto, crearProyecto, asegurarProyecto, baseProyectos, leerRecientes, recordar, olvidarProyecto, borrarProyecto } from "./proyectos.js";
 import { textoExperiencia, textoPropuestas, verPropuesta, decidirPropuesta } from "./experience.js";
+import { listarSkills, leerSkill, guardarSkill, borrarSkill, ignoradosSkills, descripcionEfectiva } from "./skills.js";
 import { fetchUpdates, tokenFromEnv, webhookSecretFromEnv, parseUpdate } from "./modules/telegram/transport.js";
 import { routeText, handleUpdate, deliver } from "./modules/telegram/bot.js";
 import { defaultBaseUrl } from "./modules/adapters/config.js";
@@ -37,6 +38,10 @@ const PATH_CHAT_SESIONES_ID_MENSAJES = "/api/chat/sesiones/{id}/mensajes";
 // Agent model management paths
 const PATH_AGENTS_MODELOS = "/api/agents/modelos";
 const PATH_AGENTS_MODELO_ID = "/api/agents/";
+// Skills paths: mismos literales que openapi.json (la deriva spec↔router se valida).
+const PATH_SKILLS = "/api/skills";
+const PATH_SKILLS_ID = "/api/skills/{id}";
+const RE_SKILL_ID = new RegExp("^" + PATH_SKILLS_ID.replace("{id}", "([^/]+)") + "$");
 
 interface Agente { id: string; rol: string; estado: string; skills: string[]; instrucciones: string; herramientas: any[]; modelo?: string }
 interface Arista { de: string; a: string; tipo: string }
@@ -94,7 +99,7 @@ const SCRIPT = [  "function esc(s){return String(s).replace(/&/g,'&amp;').replac
 "function load(){Promise.all([fetch('api/orquestacion').then(function(r){return r.json();}),fetch('api/trabajo').then(function(r){return r.json();})]).then(function(ds){var d=ds[0],t=ds[1];if(d&&d.techo){var techo=document.getElementById('orq-techo');if(techo)techo.textContent='Límite: '+d.techo.rondas+' rondas · '+d.techo.tokens+' tokens · '+d.techo.calls+' llamadas';var stt=document.getElementById('st-techo');if(stt)stt.textContent='Techo: '+d.techo.rondas+' rondas · '+d.techo.tokens+' tokens · '+d.techo.calls+' llamadas';var tareas=document.getElementById('orq-tareas');if(tareas){tareas.innerHTML='';(d.tareas||[]).forEach(function(x){var b=document.createElement('button');b.className='mini';b.textContent=x.estado+': '+x.n;b.onclick=function(){nav('tra');};tareas.appendChild(b);});if(!d.tareas.length)tareas.textContent='Sin tareas registradas.';}var a=document.getElementById('orq-timeline');if(a)a.textContent=(d.aprobaciones||[]).map(function(x){return x.estado+' · '+x.tool+' · '+x.id;}).join(' — ')||'Sin actividad registrada.';agload();}if(d&&d.aprobaciones){var ap=document.getElementById('apr');if(ap){ap.innerHTML='';(d.aprobaciones||[]).forEach(function(x){var card=document.createElement('div'),label=document.createElement('div');card.className='apcard';label.textContent=x.tool+' · '+x.riesgo+' · '+x.estado+' · '+x.id;card.appendChild(label);if(x.estado==='pendiente'){var si=document.createElement('button'),no=document.createElement('button');si.textContent='Aprobar';no.textContent='Rechazar';si.setAttribute('data-tgcb',String(x.id));no.setAttribute('data-tgcb',String(x.id));si.onclick=function(){tgcb(String(x.id),true);};no.onclick=function(){tgcb(String(x.id),false);};card.appendChild(si);card.appendChild(no);}ap.appendChild(card);});if(!ap.children.length)ap.textContent='No hay aprobaciones pendientes.';}}}).catch(function(e){errbox('orq-techo',e);errbox('apr',e);});}",
 "function decidirUI(id,ok){fetch('api/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,ok:ok,quien:'web'})}).then(function(r){return r.json();}).then(function(d){sysline(d.msg||d.error);load();}).catch(function(e){sysline('Error al decidir: '+e.message);});}",
 "function trabajoload(){fetch('api/trabajo').then(function(r){return r.json();}).then(function(d){var box=document.getElementById('tra');if(!box)return;if(!Array.isArray(d.specs))throw new Error(d.error||'Error');box.innerHTML=(d.specs||[]).map(function(s){return '<section class=\"stcard\"><b>'+esc(s.id)+' · '+esc(s.title)+'</b> <span class=\"pill\">'+esc(s.status)+'</span>'+(s.tareas||[]).map(function(t){return '<div class=\"trl\">'+esc(t.estado)+' · '+esc(t.id)+' · '+esc(t.archivos)+' archivos</div>';}).join('')+'</section>';}).join('')||'<div class=\"hint\">Sin specs. Usa axiom spec desde la CLI para crear una.</div>';}).catch(function(e){errbox('tra',e);});}",
-"function cfgload(){cfgAdapters();tgcfg();agload();modload();allowload();secpres();proy();}",
+"function cfgload(){cfgAdapters();tgcfg();agload();modload();allowload();secpres();proy();skload();}",
 "function cfgAdapters(){fetch('api/adapters/config').then(function(r){return r.json();}).then(function(d){var c=d.config||{};document.getElementById('cfgprov').value=c.proveedor||'off';document.getElementById('cfgbase').value=c.baseUrl||'';document.getElementById('cfgto').value=c.timeoutMs||30000;document.getElementById('cfgmax').value=c.maxChars||8000;cfgmodelos(c.model);}).catch(function(e){errbox('cfgnote',e);});}",
 "function cfgmodelos(selected){var p=document.getElementById('cfgprov').value;fetch('api/adapters/modelos?filtro='+encodeURIComponent(document.getElementById('cfgfiltro').value||'todos')).then(function(r){return r.json();}).then(function(d){var m=document.getElementById('cfgmodel');m.innerHTML='';(d.modelos||[]).forEach(function(x){var o=document.createElement('option');o.value=x.id;o.textContent=x.id+(x.free?' · free':'');m.appendChild(o);});if(selected)m.value=selected;}).catch(function(e){errbox('cfgnote',e);});}",
 "function cfgsave(){fetch('api/adapters/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({proveedor:document.getElementById('cfgprov').value,model:document.getElementById('cfgmodel').value,baseUrl:document.getElementById('cfgbase').value,timeoutMs:Number(document.getElementById('cfgto').value),maxChars:Number(document.getElementById('cfgmax').value)})}).then(function(r){return r.json();}).then(function(d){if(!d.ok)throw new Error(d.error);document.getElementById('cfgnote').textContent='Proveedor guardado.';chatprov();}).catch(function(e){document.getElementById('cfgnote').textContent='Error: '+e.message;});}",
@@ -275,6 +280,80 @@ const SCRIPT = [  "function esc(s){return String(s).replace(/&/g,'&amp;').replac
 "function errbox(id,causa){var box=document.getElementById(id);if(!box)return;var m=String(causa&&causa.message?causa.message:(causa||'fetch fallido')).slice(0,180);box.innerHTML='<div class=\"errorbox\">NO SE PUDO CARGAR \\u2014 '+esc(m)+'</div>';}",
 "function guardacargando(){var ids=['orq-agentes','tra','apr','mdl-agentes','red','memoria','modlist','allowchips','holog','dagcfg','modpanel'];ids.forEach(function(id){var e=document.getElementById(id);if(e&&String(e.textContent||'').indexOf('Cargando')>=0)errbox(id,'el servidor no respondio (timeout de carga)');});}",
 "function tglog(m){var e=document.getElementById('tglablog');if(e)e.textContent=String(m).slice(0,500);}",
+"// --- Skills (catálogo editable) ---",
+"function skmontar(){",
+"  if(document.getElementById('cfg-skills')) return;",
+"  var nav=document.querySelector('#v-cfg .modtabs');",
+"  if(nav){var b=document.createElement('button');b.textContent='Skills';b.onclick=function(){irpanel('cfg-skills');};nav.appendChild(b);}",
+"  var v=document.getElementById('v-cfg'); if(!v) return;",
+"  var grid=document.createElement('div'); grid.className='cfggrid';",
+"  grid.innerHTML='<div id=\"cfg-skills\"><h2>Módulo: Skills</h2>'+",
+"    '<div class=\"secnote\">El catálogo de código es la base; un archivo <code>skills/&lt;id&gt;/SKILL.md</code> del proyecto lo sobreescribe. Lo que ves aquí es lo que recibe el prompt del agente.</div>'+",
+"    '<div id=\"sk-lista\" class=\"hint\">Cargando…</div>'+",
+"    '<div class=\"row\"><label for=\"sk-id\">Id</label><input id=\"sk-id\" autocomplete=\"off\" placeholder=\"mi-skill\" size=\"18\"><label for=\"sk-desc\">Descripción</label><input id=\"sk-desc\" autocomplete=\"off\" placeholder=\"para qué sirve\" size=\"30\"></div>'+",
+"    '<div class=\"row\"><label for=\"sk-cuerpo\" style=\"align-self:flex-start\">Cuerpo</label><textarea id=\"sk-cuerpo\" rows=\"7\" style=\"flex:1;min-width:320px;background:var(--panel-bg);color:var(--fg);border:1px solid var(--panel-line);border-radius:6px;padding:6px 8px;font:inherit\" placeholder=\"instrucciones que recibe el agente\"></textarea></div>'+",
+"    '<div class=\"row\"><button onclick=\"skguardar()\">Guardar skill</button><button onclick=\"sknuevo()\">Nuevo</button><button onclick=\"skborraractual()\" title=\"Borra el archivo del proyecto; si existe en el catálogo, vuelve a su versión base\">Quitar override</button><span class=\"hint\" id=\"sk-log\">Elige un skill de la lista o crea uno nuevo.</span></div>'+",
+"    '<div class=\"secnote\">Ids: a-z, 0-9 y guion. Sin archivo se usa el catálogo; un archivo sin cuerpo deja al agente solo con el nombre.</div></div>';",
+"  v.appendChild(grid);",
+"}",
+"function skload(){",
+"  skmontar();",
+"  fetch('api/skills').then(function(r){if(r.status===409)return {off:true};return r.json();}).then(function(d){",
+"    if(d.off){var box=document.getElementById('sk-lista');if(box)box.innerHTML='<span class=\"hint\">Módulo skills apagado: actívalo en Módulos para ver y editar el catálogo.</span>';return;}",
+"    if(!d.ok) throw new Error(d.error||'no se pudieron listar los skills');",
+"    window.skCache=d.skills||[];",
+"    skrender();",
+"    if((d.ignorados||[]).length) sklog('Carpetas ignoradas por id inválido: '+d.ignorados.join(', '));",
+"  }).catch(function(e){errbox('sk-lista',e);});",
+"}",
+"function skestado(s){return s.origen==='override'?'override':(s.origen==='proyecto'?'solo proyecto':'catálogo');}",
+"function skrender(){",
+"  var box=document.getElementById('sk-lista'); if(!box) return;",
+"  var lista=window.skCache||[];",
+"  var html='<table><thead><tr><th>Id</th><th>Origen</th><th>Descripción</th><th></th></tr></thead><tbody>';",
+"  lista.forEach(function(s){",
+"    html+='<tr><td><code>'+esc(s.id)+'</code></td><td>'+esc(skestado(s))+(s.tieneCuerpo?'':' <span class=\"bad\">sin cuerpo</span>')+'</td><td>'+esc(s.descripcion)+'</td><td><button class=\"mini\" data-sk=\"'+esc(s.id)+'\">Editar</button></td></tr>';",
+"  });",
+"  html+='</tbody></table>';",
+"  box.innerHTML=html;",
+"  box.onclick=function(ev){var b=ev.target&&ev.target.closest?ev.target.closest('button[data-sk]'):null;if(b)skabrir(b.getAttribute('data-sk'));};",
+"}",
+"function skabrir(id){",
+"  var s=(window.skCache||[]).filter(function(x){return x.id===id;})[0];",
+"  if(!s) return;",
+"  document.getElementById('sk-id').value=s.id;",
+"  document.getElementById('sk-desc').value=s.descripcion||'';",
+"  fetch('api/skills/'+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){",
+"    if(!d.ok) throw new Error(d.error||'no se pudo leer');",
+"    document.getElementById('sk-cuerpo').value=d.skill.cuerpo||'';",
+"    sklog('Editando '+id+' · '+skestado(d.skill)+(d.skill.override?' (sobreescribe el catálogo)':''));",
+"  }).catch(function(e){sklog('Error al leer '+id+': '+e.message);});",
+"}",
+"function sknuevo(){",
+"  document.getElementById('sk-id').value='';",
+"  document.getElementById('sk-desc').value='';",
+"  document.getElementById('sk-cuerpo').value='';",
+"  sklog('Nuevo skill: escribe id, descripción y cuerpo, luego Guardar.');",
+"}",
+"function skguardar(){",
+"  var id=document.getElementById('sk-id').value.trim().toLowerCase();",
+"  var desc=document.getElementById('sk-desc').value.trim();",
+"  var cuerpo=document.getElementById('sk-cuerpo').value;",
+"  fetch('api/skills/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({descripcion:desc,cuerpo:cuerpo})}).then(function(r){return r.json();}).then(function(d){",
+"    if(!d.ok) throw new Error(d.error||'no se pudo guardar');",
+"    sklog(d.msg||'guardado'); skload();",
+"  }).catch(function(e){sklog('Error: '+e.message);});",
+"}",
+"function skborraractual(){",
+"  var id=document.getElementById('sk-id').value.trim();",
+"  if(!id){sklog('Elige un skill primero.');return;}",
+"  if(!window.confirm('¿Quitar '+id+' del proyecto? Si existe en el catálogo, vuelve a su versión base.')) return;",
+"  fetch('api/skills/'+encodeURIComponent(id),{method:'DELETE'}).then(function(r){return r.json();}).then(function(d){",
+"    if(!d.ok) throw new Error(d.error||'no se pudo borrar');",
+"    sklog(d.msg||'borrado'); sknuevo(); skload();",
+"  }).catch(function(e){sklog('Error: '+e.message);});",
+"}",
+"function sklog(m){var e=document.getElementById('sk-log');if(e)e.textContent='['+new Date().toLocaleTimeString()+'] '+m;}",
 
 // Auto-init on DOMContentLoaded
 "document.addEventListener('DOMContentLoaded', function(){",
@@ -608,6 +687,37 @@ async function handleAgentsSkill(root: string, req: any, res: any): Promise<void
   if (!r.config.agentes.some((a: any) => a.id === id)) { json(res, 400, { ok: false, error: "no existe" }); return; }
   saveAgents(root, { ...r.config, agentes: r.config.agentes.map((a: any) => a.id === id && !a.skills.includes(skill) ? { ...a, skills: [...a.skills, skill] } : a) });
   json(res, 200, { ok: true, msg: `${id} +skill ${skill}` });
+}
+
+// Skills: catálogo + archivos del proyecto. El módulo apagado cierra la ruta (fail closed).
+async function handleSkills(root: string, req: any, res: any): Promise<void> {
+  if (!moduloActivo(root, "skills")) { json(res, 409, { ok: false, error: "módulo skills deshabilitado" }); return; }
+  const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+  if (pathname === PATH_SKILLS) {
+    if (req.method !== "GET") { json(res, 405, { ok: false, error: "Método no permitido" }); return; }
+    json(res, 200, { ok: true, skills: listarSkills(root), ignorados: ignoradosSkills(root) });
+    return;
+  }
+  const m = pathname.match(RE_SKILL_ID);
+  if (!m) { json(res, 404, { ok: false, error: "Not found" }); return; }
+  const id = decodeURIComponent(m[1]);
+  if (req.method === "GET") {
+    const r = leerSkill(root, id);
+    json(res, r.ok ? 200 : 404, r);
+    return;
+  }
+  if (req.method === "POST") {
+    const body = await readBody(req);
+    const r = guardarSkill(root, id, { descripcion: body?.descripcion, cuerpo: body?.cuerpo });
+    json(res, r.ok ? 200 : 400, r);
+    return;
+  }
+  if (req.method === "DELETE") {
+    const r = borrarSkill(root, id);
+    json(res, r.ok ? 200 : 400, r);
+    return;
+  }
+  json(res, 405, { ok: false, error: "Método no permitido" });
 }
 
 async function handleSecrets(root: string, req: any, res: any): Promise<void> {
@@ -1130,7 +1240,10 @@ async function handleChat(root: string, req: any, res: any): Promise<void> {
       : "";
     const prompt = buildMode
       ? `${buildPreamble}\n\nSolicitud del usuario:\n${texto}${historial ? `\n\n${historial}` : ""}`
-      : promptPara(modoActual, typeof skill === "string" ? skill : "", texto, { historial });
+      : promptPara(modoActual, typeof skill === "string" ? skill : "", texto, {
+          historial,
+          skillDescripcion: typeof skill === "string" && skill ? descripcionEfectiva(root, skill) : undefined,
+        });
     const esStream = body?.stream === true;
     if (esStream) {
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-store", Connection: "keep-alive" });
@@ -1220,11 +1333,11 @@ async function handleChat(root: string, req: any, res: any): Promise<void> {
     return;
   }
   if (req.method === "GET" && pathname === "/api/chat/skills") {
-    // Return available skills from agents config
+    // Catálogo + archivos del proyecto + ids que algún agente declare: el chat
+    // puede enfocar cualquier skill que exista, aunque ningún agente lo use aún.
+    const skills = new Set<string>(listarSkills(root).map((s) => s.id));
     const r = loadAgents(root);
-    if (!r.ok) { json(res, 500, { ok: false, error: r.error }); return; }
-    const skills = new Set<string>();
-    for (const a of r.config.agentes) for (const s of a.skills) skills.add(s);
+    if (r.ok) for (const a of r.config.agentes) for (const s of a.skills) skills.add(s);
     json(res, 200, { ok: true, skills: Array.from(skills) });
     return;
   }
@@ -1312,6 +1425,10 @@ export function startWeb(root: string, port: number): {port:number;close:()=>voi
       if(pathname==="/api/telegram/webhook"){await handleTelegramWebhook(root,req,res);return;}
       if(pathname==="/api/telegram/lab"){await handleTelegramLab(root,req,res);return;}
       if(pathname==="/api/telegram/detectar"){await handleTelegramDetectar(root,req,res);return;}
+
+      // Skills (catálogo editable por proyecto)
+      if(pathname===PATH_SKILLS){await handleSkills(root,req,res);return;}
+      if(RE_SKILL_ID.test(pathname)){await handleSkills(root,req,res);return;}
 
       // Agents
       if(pathname==="/api/agents"){await handleAgents(root,req,res);return;}
