@@ -2519,6 +2519,17 @@
           "ok": {
             "type": "boolean"
           },
+          "config_version": {
+            "type": "integer",
+            "description": "Versión del formato de agents.config.json (2 = posterior a la cota del agente). Sin archivo o sin sello: 1."
+          },
+          "migracion": {
+            "type": "object",
+            "description": "Migraciones aplicadas al archivo, con su fecha ISO-8601 (p. ej. delega: los agentes con aristas de delegación recibieron delega=allow una vez). Vacío si el archivo no se migró.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
           "agentes": {
             "type": "array",
             "items": {

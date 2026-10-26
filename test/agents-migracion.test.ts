@@ -9,7 +9,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asegurarProyecto } from "../dist/proyectos.js";
-import { loadAgents } from "../dist/modules/agents/config.js";
+import { loadAgents, saveAgents } from "../dist/modules/agents/config.js";
 import { handoff } from "../dist/modules/agents/handoff.js";
 
 function conProyecto(fn: (root: string) => void): void {
@@ -73,11 +73,20 @@ test("un config anterior recibe delega=allow solo en quien delega, y una sola ve
     const enDisco = JSON.parse(readFileSync(join(root, "agents.config.json"), "utf8"));
     assert.equal(enDisco.nombre, "proyecto-viejo");
     assert.equal(enDisco.config_version, 2, "queda sellado: la migración no se repite");
+    assert.match(String(enDisco.migracion?.delega ?? ""), /^\d{4}-\d{2}-\d{2}T/, "queda rastro con fecha para poder contarlo en Ajustes");
     const orq = enDisco.agentes.find((a: any) => a.id === "orquestador");
     assert.deepEqual(orq.herramientas, [{ tool: "delega", acceso: "allow" }]);
     const segunda = loadAgents(root);
     assert.ok(segunda.ok);
     assert.ok(segunda.ok && !segunda.reparado, "la segunda carga no debe reportar reparación");
+    if (segunda.ok) {
+      // El rastro sobrevive a una edición normal (load → save de la UI/CLI).
+      assert.equal(segunda.config.migracion?.delega, enDisco.migracion.delega);
+      saveAgents(root, segunda.config);
+      const tercera = loadAgents(root);
+      assert.ok(tercera.ok);
+      assert.equal(tercera.ok && tercera.config.migracion?.delega, segunda.config.migracion?.delega);
+    }
   });
 });
 
@@ -111,6 +120,7 @@ test("un config ya sellado no se migra: sin declaración sigue denegando", () =>
     assert.ok(!carga.reparado);
     const orq = carga.config.agentes.find((a) => a.id === "orquestador");
     assert.deepEqual(orq?.herramientas, [], "en un config actual no se inventa delega");
+    assert.equal(carga.config.migracion, undefined, "sin migración no hay rastro que mostrar");
     assert.match(handoff(root, "orquestador", "implementador", "revisar el plan"), /denegado/);
   });
 });

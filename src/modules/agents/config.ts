@@ -42,6 +42,9 @@ export const AgentsConfig = z.object({
   // Versión del formato. <2 = config de antes de que el broker cruzara la
   // declaración del agente: se migra una sola vez y se sella en 2 (ver loadAgents).
   config_version: z.number().int().min(1).max(99).optional(),
+  // Qué migraciones se aplicaron y cuándo (<clave>: ISO-8601). Se conserva al
+  // guardar para que la web pueda decirlo en vez de cambiar el archivo en silencio.
+  migracion: z.record(z.string().max(64)).optional(),
   agentes: z.array(Agente).default([]),
   aristas: z.array(Arista).default([]),
 });
@@ -191,6 +194,13 @@ export function loadAgents(root: string): { ok: true; config: AgentsConfig; defe
       : 1;
     const legado = version < 2;
     const migrado = legado ? migrarDeclaracionDelega(piolin) : false;
+    if (migrado && piolin && typeof piolin === "object") {
+      // Deja rastro: la web lo muestra en Ajustes → Agentes, así la migración no
+      // cambia el archivo sin que el usuario sepa por qué sus agentes declaran más.
+      const j = piolin as { migracion?: unknown };
+      const previa = j.migracion && typeof j.migracion === "object" && !Array.isArray(j.migracion) ? j.migracion : {};
+      j.migracion = { ...previa, delega: new Date().toISOString() };
+    }
     if (legado) (piolin as { config_version?: number }).config_version = 2;
     let config = parsed.data;
     if (legado) {
