@@ -16,7 +16,8 @@ const rules = {
   "secrets.ts": [],
   "components.ts": ["./store.js"],
   "sandbox.ts": [],
-  "sessions.ts": ["./store.js"],
+  // sessions importa solo el texto del baseline anti-inyección (sin lógica de agents).
+  "sessions.ts": ["./store.js", "./modules/agents/defensa.js"],
   // proyectos importa el catálogo de skills (datos puros: schema zod + textos) para
   // escribir skills/<id>/SKILL.md desde una sola fuente. No toca lógica de agents.
   "proyectos.ts": ["./store.js", "./modules/agents/skills.js"],

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { openDb } from "./store.js";
+// Texto puro del harness (baseline anti-inyección): el chat lo inyecta igual que el grafo.
+import { BASELINE_INYECCION } from "./modules/agents/defensa.js";
 
 // Sesiones de chat por proyecto (F2): historial persistente en SQLite.
 // El store del proyecto vive en <root>/axiom.db; cambiar de proyecto = otro root.
@@ -272,10 +274,13 @@ export function promptPara(modo: ModoChat, skill: string, texto: string, extra: 
   const cab = rol ? `[rol]\n${rol}\n` : "";
   const hist = (extra.historial ?? "").trim().slice(0, 12000);
   const ctx = hist ? `\n\n${hist}` : "";
-  if (modo === "ask") return `${cab}${foco}Responde a la pregunta de forma directa y concisa. Solo lectura: no ejecutes nada ni propongas actuar; si falta información, dilo.${ctx}\n\nPregunta: ${texto}`;
+  // El chat también recibe contenido del proyecto (historial, archivos): misma defensa
+  // anti-inyección que agentes y juez, para no dejar una superficie sin cubrir.
+  const defensa = `\n\n${BASELINE_INYECCION}`;
+  if (modo === "ask") return `${cab}${foco}Responde a la pregunta de forma directa y concisa. Solo lectura: no ejecutes nada ni propongas actuar; si falta información, dilo.${ctx}\n\nPregunta: ${texto}${defensa}`;
   if (modo === "plan") {
-    if (esTrivial(texto)) return `${cab}${foco}Responde de forma directa y breve (1-2 líneas), como un saludo o acuse. No elabores un plan numerado ni ofrezcas pasar a Build; solo si el mensaje insinúa una tarea pendiente, ofrece convertirlo en plan.${ctx}\n\nMensaje: ${texto}`;
-    return `${cab}${foco}Investiga lo necesario y responde ÚNICAMENTE con un plan numerado de pasos, revisable por un humano. No ejecutes nada. Termina ofreciendo pasar a Build.${ctx}\n\nObjetivo: ${texto}`;
+    if (esTrivial(texto)) return `${cab}${foco}Responde de forma directa y breve (1-2 líneas), como un saludo o acuse. No elabores un plan numerado ni ofrezcas pasar a Build; solo si el mensaje insinúa una tarea pendiente, ofrece convertirlo en plan.${ctx}\n\nMensaje: ${texto}${defensa}`;
+    return `${cab}${foco}Investiga lo necesario y responde ÚNICAMENTE con un plan numerado de pasos, revisable por un humano. No ejecutes nada. Termina ofreciendo pasar a Build.${ctx}\n\nObjetivo: ${texto}${defensa}`;
   }
-  return `${cab}${foco}${texto}${ctx}`;
+  return `${cab}${foco}${texto}${ctx}${defensa}`;
 }
