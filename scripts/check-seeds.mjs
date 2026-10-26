@@ -6,7 +6,7 @@
 //    escribe asegurarProyecto (agents.config.json del proyecto nuevo).
 //  - adapters: literal de loadConfig cuando no hay archivo (adapters.config.json ausente).
 //  - telegram: literal de loadConfig cuando no hay archivo (ni legacy).
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ import { dirname } from "node:path";
 const aqui = dirname(fileURLToPath(import.meta.url));
 const dist = join(aqui, "..", "dist");
 
-const { loadAgents, AgentsConfig, SKILLS, Skill } = await import(join(dist, "modules", "agents", "config.js"));
+const { loadAgents, AgentsConfig, SKILLS, Skill, cuerpoSkill } = await import(join(dist, "modules", "agents", "config.js"));
 const { asegurarProyecto } = await import(join(dist, "proyectos.js"));
 const { loadConfig: loadAdapters, AdaptersConfig } = await import(join(dist, "modules", "adapters", "config.js"));
 const { loadConfig: loadTelegram, TelegramConfig } = await import(join(dist, "modules", "telegram", "config.js"));
@@ -90,9 +90,40 @@ const temp = () => mkdtempSync(join(tmpdir(), "axiom-seed-check-"));
   rmSync(rtmp, { recursive: true, force: true });
 }
 
+// SEED 6 — agents: el esqueleto documenta en disco TODOS los skills que referencia.
+// Un agente puede referenciar un skill; si falta skills/<id>/SKILL.md (o está sin el
+// cuerpo del catálogo), el proyecto arranca con documentación incompleta.
+{
+  const r = temp();
+  try {
+    const creado = asegurarProyecto(r);
+    const carga = loadAgents(r);
+    if (!creado.ok || !carga.ok) {
+      chequear("agents/esqueleto-skills", false, !creado.ok ? creado.error : !carga.ok ? carga.error : "");
+    } else {
+      const refs = [...new Set(carga.config.agentes.flatMap((a) => a.skills))];
+      const conCuerpo = new Set(SKILLS.map((s) => s.id));
+      const sinCuerpo = refs.filter((s) => !conCuerpo.has(s));
+      chequear("agents/esqueleto-skills", sinCuerpo.length === 0,
+        sinCuerpo.length ? `skills referenciados sin cuerpo: ${sinCuerpo.join(", ")}` : "");
+      const sinDoc = refs.filter((s) => !existsSync(join(r, "skills", s, "SKILL.md")));
+      chequear("agents/esqueleto-skills-md", sinDoc.length === 0,
+        sinDoc.length ? `sin skills/<id>/SKILL.md: ${sinDoc.join(", ")}` : "");
+      const sinCuerpoEnDisco = refs.filter((s) => {
+        const f = join(r, "skills", s, "SKILL.md");
+        if (!existsSync(f)) return false;
+        const cuerpo = cuerpoSkill(s);
+        return typeof cuerpo === "string" && cuerpo.length > 0 && !readFileSync(f, "utf8").includes(cuerpo);
+      });
+      chequear("agents/esqueleto-skills-cuerpo", sinCuerpoEnDisco.length === 0,
+        sinCuerpoEnDisco.length ? `SKILL.md sin el cuerpo del catálogo: ${sinCuerpoEnDisco.join(", ")}` : "");
+    }
+  } finally { rmSync(r, { recursive: true, force: true }); }
+}
+
 if (fallos.length > 0) {
   console.error(`seeds: ${fallos.length} drift(es)`);
   for (const f of fallos) console.error(`SEED ${f}`);
   process.exit(1);
 }
-console.log("seeds OK (agents default+esqueleto, adapters, telegram)");
+console.log("seeds OK (agents default+esqueleto+skills, adapters, telegram)");

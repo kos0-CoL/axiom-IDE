@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asegurarProyecto } from "../dist/proyectos.js";
-import { loadAgents } from "../dist/modules/agents/config.js";
+import { cuerpoSkill, loadAgents } from "../dist/modules/agents/config.js";
 
 const TIPOS = new Set(["delega", "comunica", "escala"]);
 
@@ -21,6 +21,49 @@ test("el esqueleto nuevo escribe agents.config.json que loadAgents acepta", () =
       for (const e of carga.config.aristas) assert.ok(TIPOS.has(e.tipo), `tipo sembrado inválido: ${e.tipo}`);
       assert.equal(carga.config.aristas.length, 7);
     }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("el esqueleto documenta en disco todos los skills que referencia", () => {
+  const base = mkdtempSync(join(tmpdir(), "axiom-skills-"));
+  const ruta = join(base, "p");
+  try {
+    assert.deepEqual(asegurarProyecto(ruta), { ok: true });
+    const carga = loadAgents(ruta);
+    assert.ok(carga.ok, `loadAgents rechaza el esqueleto: ${!carga.ok ? carga.error : ""}`);
+    if (!carga.ok) return;
+    const ids = new Set(carga.config.agentes.map((a) => a.id));
+    for (const id of ["cazador-fallos", "reparador-build"]) assert.ok(ids.has(id), `falta el nodo ${id}`);
+    const refs = [...new Set(carga.config.agentes.flatMap((a) => a.skills))];
+    for (const s of refs) {
+      const f = join(ruta, "skills", s, "SKILL.md");
+      assert.ok(existsSync(f), `sin skills/${s}/SKILL.md (el catálogo no cubre lo que el grafo referencia)`);
+      const md = readFileSync(f, "utf8");
+      assert.match(md, new RegExp(`# SKILL: ${s}`));
+      const cuerpo = cuerpoSkill(s);
+      assert.ok(cuerpo && md.includes(cuerpo), `SKILL.md de ${s} no lleva el cuerpo del catálogo`);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("el seed por defecto usa los mismos ids canónicos que el esqueleto", () => {
+  const base = mkdtempSync(join(tmpdir(), "axiom-defecto-"));
+  try {
+    const carga = loadAgents(base); // sin agents.config.json → defecto()
+    assert.ok(carga.ok && carga.defecto, `loadAgents no devolvió el seed por defecto: ${!carga.ok ? carga.error : ""}`);
+    if (!carga.ok) return;
+    const ids = carga.config.agentes.map((a) => a.id);
+    assert.ok(ids.includes("cazador-fallos"), "el seed por defecto no trae cazador-fallos");
+    assert.ok(ids.includes("reparador-build"), "el seed por defecto no trae reparador-build");
+    assert.ok(carga.config.aristas.some((e) => e.a === "cazador-fallos"), "sin arista hacia cazador-fallos");
+    assert.ok(carga.config.aristas.some((e) => e.a === "reparador-build"), "sin arista hacia reparador-build");
+    // Los ids viejos en inglés no deben quedar vivos en ningún seed.
+    assert.equal(ids.includes("silent-failure-hunter"), false);
+    assert.equal(ids.includes("build-fixer"), false);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

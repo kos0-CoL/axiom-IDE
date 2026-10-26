@@ -95,16 +95,17 @@ function defecto(): AgentsConfig {
     { id: "nodo-code", rol: "nodo", modelo: "hereda-proveedor", estado: "activo", skills: ["implementar", "verify"], instrucciones: "", herramientas: [] },
     { id: "nodo-review", rol: "nodo", modelo: "hereda-proveedor", estado: "activo", skills: ["review", "evidence"], instrucciones: "", herramientas: [] },
     { id: "esp-seguridad", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["policy", "sandbox"], instrucciones: "", herramientas: [] },
-    { id: "silent-failure-hunter", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["silent-failures", "error-propagation"], instrucciones: "Caza fallos silenciosos: catches vacíos, fallbacks peligrosos, errores no propagados. Reporta ubicación + fallo concreto.", herramientas: [] },
-    { id: "build-fixer", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["build-fix", "minimal-diff"], instrucciones: "Arregla errores de build/tipos con cambios mínimos; sin refactors ni cambios arquitectónicos.", herramientas: [] },
+    // Nombres canónicos (iguales a los del esqueleto del proyecto): un solo id por nodo.
+    { id: "cazador-fallos", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["silent-failures", "error-propagation"], instrucciones: "Caza fallos silenciosos: catches vacíos, fallbacks peligrosos, errores no propagados. Reporta ubicación + fallo concreto.", herramientas: [] },
+    { id: "reparador-build", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["build-fix", "minimal-diff"], instrucciones: "Arregla errores de build/tipos con cambios mínimos; sin refactors ni cambios arquitectónicos.", herramientas: [] },
     ],
     aristas: [
       { de: "orquestador", a: "nodo-code", tipo: "delega" },
       { de: "orquestador", a: "nodo-review", tipo: "delega" },
       { de: "nodo-code", a: "esp-seguridad", tipo: "escala" },
       { de: "nodo-review", a: "orquestador", tipo: "comunica" },
-      { de: "orquestador", a: "silent-failure-hunter", tipo: "escala" },
-      { de: "orquestador", a: "build-fixer", tipo: "delega" },
+      { de: "orquestador", a: "cazador-fallos", tipo: "escala" },
+      { de: "orquestador", a: "reparador-build", tipo: "delega" },
     ],
   };
 }

@@ -2,37 +2,14 @@ import { homedir } from "node:os";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openDb } from "./store.js";
+// Catálogo único de skills (datos puros: id + descripción + cuerpo). El esqueleto
+// escribe skills/<id>/SKILL.md desde aquí; no hay segunda lista que se desincronice.
+import { SKILLS, skillMarkdown } from "./modules/agents/skills.js";
 
 // Proyectos = carpetas en el servidor, cada una con su propio store.SQLite.
 // La web crea la carpeta (specs, políticas, SQLite) y cambia a ella sin reiniciar.
 
 const RECIENTES_FILE = ".axiom-recientes.json";
-
-// Skills que el esqueleto deja listas: el chat las usa con [enfoque skill].
-const SKILLS_DEFECTO: { id: string; desc: string; cuerpo: string }[] = [
-  { id: "plan", desc: "planificación", cuerpo: "Produce planes numerados, cortos y verificables: una línea por paso, cada paso con su criterio de aceptación. No escribe código: planifica." },
-  { id: "implementar", desc: "implementación de código", cuerpo: "Escribe código coherente con el stack del proyecto. Prefiere archivos nuevos salvo que el cambio exija reemplazo; anuncia qué archivos toca y qué criterio cumple." },
-  { id: "verify", desc: "verificación con evidencia", cuerpo: "Verifica con evidencia real: comando ejecutado, salida relevante y veredicto. Sin cmd+sha+veredicto el resultado es no verificado." },
-  { id: "review", desc: "revisión de cambios", cuerpo: "Revisa cada cambio en dos ejes: Standards (¿respeta las reglas del repo?) y Spec (¿cumple lo pedido?). No re-ranquea ni Cambia requisitos." },
-  { id: "evidence", desc: "evidencias", cuerpo: "Registra evidencias verificables: comando, salida, sha y fecha. Nada de afirmaciones sin prueba." },
-  { id: "policy", desc: "políticas y límites", cuerpo: "Aplica policies.global.json y project.json: techos de rondas, tokens y llamadas; herramientas permitidas y riesgo de cada acción." },
-  { id: "broker", desc: "decisiones del broker", cuerpo: "Decide aprobaciones de riesgo: operaciones grandes requieren aprobación explícita del humano; sin respuesta no hay aprobación." },
-  { id: "sandbox", desc: "ejecución aislada", cuerpo: "Ejecuta comandos en entorno aislado cuando el riesgo lo indique; nunca desde el canal de transporte." },
-];
-
-function skillMarkdown(s: { id: string; desc: string; cuerpo: string }): string {
-  return `# SKILL: ${s.id}
-
-Objetivo: ${s.desc}.
-
-## Cómo trabajar con esta skill
-${s.cuerpo}
-
-## Formato de salida
-- Concreta, sin prosa de relleno.
-- Cada afirmación acompañada de su evidencia o criterio de aceptación.
-`;
-}
 
 
 
@@ -237,8 +214,8 @@ Comandos útiles (axiom CLI):
 ` + "\n",
     );
     ponDefecto("agents.config.json", JSON.stringify(agentsConfigDefecto(nom), null, 2) + "\n");
-    for (const s of SKILLS_DEFECTO) {
-      ponDefecto(join("skills", s.id, "SKILL.md"), skillMarkdown(s) + "\n");
+    for (const s of SKILLS) {
+      ponDefecto(join("skills", s.id, "SKILL.md"), skillMarkdown(s));
     }
     ponDefecto("docs/decisions/ADR-0001-inicio.md", `# ADR-0001 — Inicio del proyecto
 

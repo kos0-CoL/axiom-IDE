@@ -17,7 +17,9 @@ const rules = {
   "components.ts": ["./store.js"],
   "sandbox.ts": [],
   "sessions.ts": ["./store.js"],
-  "proyectos.ts": ["./store.js"],
+  // proyectos importa el catálogo de skills (datos puros: schema zod + textos) para
+  // escribir skills/<id>/SKILL.md desde una sola fuente. No toca lógica de agents.
+  "proyectos.ts": ["./store.js", "./modules/agents/skills.js"],
   "modulos.ts": ["./modules/module-builder.js"],
   "runmark.ts": ["./store.js"],
   "experience.ts": ["./store.js"],
