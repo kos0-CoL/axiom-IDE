@@ -64,6 +64,11 @@ solo cuando aportan independencia o herramientas más acotadas
 - `delega=allow` en los 7 agentes con aristas salientes (`orquestador`, `planificador`,
   `implementador`, `explorador`, `verificador`, `revisor`, `evaluador-harness`): el handoff
   se autoriza con la declaración del agente que delega.
+- El runner (`run --agente`) consulta al broker **antes** de cada uso: `delega` del orquestador
+  al nodo, `editar` del nodo para escribir su trabajo y `delega` del nodo al juez. `deny`
+  detiene la corrida sin gastar spawn; `ask` deja la aprobación y una concesión autoriza un
+  solo uso. Las herramientas que el runner no puede ejercer (p. ej. `ejecutar`) siguen siendo
+  cota declarada, no capacidad: no hay ejecución de comandos en el grafo.
 - Roles disponibles: `orquestador`, `nodo`, `especializado`, `subagente`.
 
 Hallazgo corregido: antes el seed por defecto (6 agentes, ids `nodo-code/nodo-review/

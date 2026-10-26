@@ -255,6 +255,14 @@ La web solo muestra presencia ("guardada" / "ausente"); los valores nunca se ree
   partir de ahí la ausencia de `delega` vuelve a denegar el handoff.
 - **`delega`** es la herramienta del handoff: la declara el agente que delega y el broker la
   autoriza con él. Los alias históricos se normalizan (`read`→`leer`, `terminal`→`ejecutar`).
+- **Runner** (`axiom run --agente`): el grafo no es un atajo. Antes de gastar un spawn se
+  autorizan los usos del paso —`delega` del orquestador hacia el nodo, `editar` del nodo para
+  escribir `trabajo-<task>.md` y `delega` del nodo hacia el juez— con la política y la
+  declaración vigentes; el delegado se elige entre los destinos activos que declaren `editar`.
+  Un `deny` detiene la ronda sin ejecutar nada y un `ask` deja la solicitud en Aprobaciones.
+  **Una aprobación autoriza un uso**: se consume al correr (dentro de 30 min) y después el
+  broker vuelve a decidir, así que no es un permiso permanente. Por eso `run --agente`
+  necesita `delega` y `editar` en global y proyecto.
 - **Riesgo alto** (terminal, publish, network) → `ask`: requiere aprobación humana, aquí o por Telegram.
 - **Techo**: la reserva del 20% es para verificación; al agotarse, el orquestador se detiene (fail closed).
 

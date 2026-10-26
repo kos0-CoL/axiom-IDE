@@ -47,11 +47,39 @@ function componer(base: Veredicto, agente?: DeclaracionAgente): Veredicto {
 }
 
 // Tabla de aprobaciones: `agente` recuerda quién pidió la herramienta para
-// revalidar su declaración al decidir. ALTER best-effort para bases ya creadas.
+// revalidar su declaración al decidir. `usada_at` marca cuándo se consumió una
+// aprobación concedida (autoriza un solo uso). ALTER best-effort para bases ya creadas.
 function prepararTabla(db: ReturnType<typeof openDb>): void {
-  db.exec("CREATE TABLE IF NOT EXISTS aprobaciones(id TEXT PRIMARY KEY, tool TEXT, riesgo TEXT, estado TEXT, created_at TEXT, decided_by TEXT, decided_at TEXT, agente TEXT)");
-  for (const col of ["decided_by TEXT", "decided_at TEXT", "agente TEXT"]) {
+  db.exec("CREATE TABLE IF NOT EXISTS aprobaciones(id TEXT PRIMARY KEY, tool TEXT, riesgo TEXT, estado TEXT, created_at TEXT, decided_by TEXT, decided_at TEXT, agente TEXT, usada_at TEXT)");
+  for (const col of ["decided_by TEXT", "decided_at TEXT", "agente TEXT", "usada_at TEXT"]) {
     try { db.exec(`ALTER TABLE aprobaciones ADD COLUMN ${col}`); } catch { /* ya existe */ }
+  }
+}
+
+// Ventana de validez de una aprobación: la misma que `decide` usa para expirar
+// una solicitud pendiente. Una concesión vieja no desbloquea una corrida de hoy.
+const VIGENCIA_MIN = 30;
+
+// Consume una aprobación ya concedida para (tool, agente): autoriza UN uso. El
+// runner la toma antes de ejecutar; sin esto, aprobar no desbloquearía nada,
+// porque cada check abre una solicitud nueva. Devuelve la aprobación consumida o
+// undefined (no había, la tomó otro proceso o está fuera de vigencia).
+export function consumirAprobacion(root: string, tool: string, agente: string): { id: string } | undefined {
+  const db = openDb(root);
+  try {
+    prepararTabla(db);
+    const desde = new Date(Date.now() - VIGENCIA_MIN * 60000).toISOString();
+    const row = db
+      .prepare("SELECT id FROM aprobaciones WHERE tool=? AND agente=? AND estado='aprobada' AND decided_at>=? ORDER BY decided_at ASC LIMIT 1")
+      .get(tool, agente, desde) as { id?: string } | undefined;
+    if (!row?.id) return undefined;
+    // CAS sobre el estado: si dos procesos compiten, solo uno la consume.
+    const marca = db.prepare("UPDATE aprobaciones SET estado='usada', usada_at=? WHERE id=? AND estado='aprobada'").run(new Date().toISOString(), row.id);
+    return Number(marca.changes ?? 0) > 0 ? { id: row.id } : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    db.close();
   }
 }
 
@@ -127,11 +155,19 @@ export function check(
 ): Veredicto & { id?: string } {
   const r = componer(effectiveAllow(root, toolName, tool), agente);
   if (r.decision === "ask") {
-    const id = createHash("sha256").update(`${toolName}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 8);
-    // audita solicitud en SQLite (tabla aprobaciones best-effort)
+    // Una solicitud pendiente vigente para la misma (herramienta, agente) se
+    // reutiliza: reintentar una corrida bloqueada no debe llenar Aprobaciones de
+    // duplicados ni invalidar el id que el usuario ya está mirando.
     try {
       const db = openDb(root);
       prepararTabla(db);
+      const desde = new Date(Date.now() - VIGENCIA_MIN * 60000).toISOString();
+      const previa = db
+        .prepare("SELECT id FROM aprobaciones WHERE tool=? AND agente IS ? AND estado='pendiente' AND created_at>=? ORDER BY created_at ASC LIMIT 1")
+        .get(toolName, agente?.id ?? null, desde) as { id?: string } | undefined;
+      if (previa?.id) { db.close(); return { ...r, id: previa.id }; }
+      const id = createHash("sha256").update(`${toolName}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 8);
+      // audita solicitud en SQLite (tabla aprobaciones best-effort)
       db.prepare("INSERT INTO aprobaciones(id,tool,riesgo,estado,created_at,agente) VALUES(?,?,?,?,?,?)").run(
         id,
         toolName,
@@ -141,8 +177,8 @@ export function check(
         agente?.id ?? null,
       );
       db.close();
-    } catch { /* best effort */ }
-    return { ...r, id };
+      return { ...r, id };
+    } catch { /* best effort: se devuelve la decisión sin id */ }
   }
   return r;
 }

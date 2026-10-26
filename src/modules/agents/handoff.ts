@@ -7,7 +7,9 @@ import { loadAgents } from "./config.js";
 import { declaracionDeHerramienta } from "./declaracion.js";
 import type { ToolContract } from "../../contracts.js";
 
-const DELEGA_CONTRACT: ToolContract = {
+// Exportado: el runner autoriza sus propias delegaciones con el mismo contrato de
+// riesgo que el handoff manual, para que el broker decida igual en ambos caminos.
+export const DELEGA_CONTRACT: ToolContract = {
   name: "delega",
   description: "Transfiere una tarea de un agente a otro (solo contexto permitido + presupuesto).",
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },

@@ -12,6 +12,11 @@ import { addConsumo, recordUso } from "../../store.js";
 import { activeDir } from "../../commands.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { check, consumirAprobacion } from "../../broker.js";
+import { effectiveAllow } from "../../policy.js";
+import { declaracionDeHerramienta, normalizarHerramienta } from "./declaracion.js";
+import { DELEGA_CONTRACT } from "./handoff.js";
+import type { ToolContract } from "../../contracts.js";
 
 export interface AgenteEjecutable {
   id: string;
@@ -35,6 +40,48 @@ export interface GrafoAgentes {
   aristas: AristaEjecutable[];
   porId: Map<string, AgenteEjecutable>;
   salientes: Map<string, AristaEjecutable[]>;
+}
+
+// Herramientas que el runner usa en nombre de un agente. No es la lista del
+// roster: solo lo que este proceso puede hacer de verdad (delegar y escribir el
+// artefacto de trabajo). `editar` va como riesgo medio porque escribe.
+const EDITAR_CONTRACT: ToolContract = {
+  name: "editar",
+  description: "Escribe el artefacto de trabajo del agente dentro de la spec.",
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+};
+
+export interface UsoAutorizado {
+  decision: "allow" | "deny" | "ask";
+  motivo: string;
+  id?: string;
+}
+
+// Puerta del runner: cada herramienta que se va a usar se autoriza ANTES de
+// gastar un spawn o de escribir. Primero se consume una aprobación ya concedida
+// (autoriza un uso, y solo si la declaración vigente sigue permitiéndolo) y, si
+// no hay, decide el broker con la declaración del agente.
+export function autorizarUso(root: string, agenteId: string, tool: string, contrato: ToolContract): UsoAutorizado {
+  const d = declaracionDeHerramienta(root, agenteId, tool);
+  // Una concesión solo resuelve un `ask`: nunca salta un deny de política vigente.
+  if (!("error" in d) && d.acceso !== "deny" && effectiveAllow(root, tool, contrato).decision !== "deny") {
+    const aprobada = consumirAprobacion(root, d.tool, agenteId);
+    if (aprobada) {
+      return { decision: "allow", motivo: `aprobación ${aprobada.id} consumida por ${agenteId}:${d.tool}`, id: aprobada.id };
+    }
+  }
+  return check(root, tool, contrato, d);
+}
+
+// Un uso no permitido detiene la corrida con el motivo del broker, no con un
+// mensaje genérico: quien lo lee sabe si falta política, declaración o aprobación.
+function motivoBloqueo(agente: string, tool: string, uso: UsoAutorizado): string | undefined {
+  if (uso.decision === "allow") return undefined;
+  if (uso.decision === "ask") {
+    if (!uso.id) return `${agente} necesita aprobación para ${tool}: ${uso.motivo} — el broker no pudo registrar la solicitud`;
+    return `${agente} necesita aprobación para ${tool} (${uso.id}): ${uso.motivo} — aprueba con \`axiom approve ${uso.id}\` y vuelve a correr (cada aprobación autoriza un uso)`;
+  }
+  return `${agente} no puede usar ${tool}: ${uso.motivo}`;
 }
 
 function cargarGrafo(root: string): GrafoAgentes | { error: string } {
@@ -123,18 +170,22 @@ async function ejecutarAgente(root: string, agente: AgenteEjecutable, prompt: st
   return spawn(root, prompt, propio ? { model: propio } : {});
 }
 
-// Encuentra el siguiente agente al que delegar según el grafo
-function encontrarDelegado(grafo: GrafoAgentes, agenteActual: string, tipoTarea: "implementar" | "review" | "policy" | "general"): string | null {
+// Encuentra el siguiente agente al que delegar según el grafo. Si el trabajo
+// necesita una herramienta (p. ej. `editar`), se prefiere un destino que la
+// declare: si no, el broker negaría la corrida entera (no declarado = denegado).
+function encontrarDelegado(grafo: GrafoAgentes, agenteActual: string, tipoTarea: "implementar" | "review" | "policy" | "general", requiere?: string): string | null {
   const salientes = grafo.salientes.get(agenteActual) ?? [];
   // Prioridad: delega > escala > comunica
   for (const tipo of ["delega", "escala", "comunica"] as const) {
-    const arista = salientes.find((e) => e.tipo === tipo);
-    if (arista) {
-      const destino = grafo.porId.get(arista.a);
-      if (destino && destino.estado === "activo") {
-        return arista.a;
-      }
-    }
+    const destino = salientes
+      .filter((e) => e.tipo === tipo)
+      .map((e) => grafo.porId.get(e.a))
+      .filter((d): d is AgenteEjecutable => !!d && d.estado === "activo");
+    if (!destino.length) continue;
+    const puede = requiere
+      ? destino.find((d) => d.herramientas.some((h) => normalizarHerramienta(h.tool) === requiere && h.acceso !== "deny"))
+      : undefined;
+    return (puede ?? destino[0]).id;
   }
   return null;
 }
@@ -161,12 +212,27 @@ export async function ejecutarTareaGrafo(
     return { ok: false, verdict: "error", trabajo: "", relPath: "", error: "Orquestador no disponible" };
   }
 
-  // Determinar a quién delegar basado en skills de la tarea
-  let delegadoId = encontrarDelegado(grafo, "orquestador", "implementar");
+  // Determinar a quién delegar: el primer destino activo (por prioridad de
+  // arista) que pueda escribir el trabajo, no uno que solo lea.
+  let delegadoId = encontrarDelegado(grafo, "orquestador", "implementar", "editar");
   if (!delegadoId) delegadoId = "nodo-code"; // fallback
   const delegado = grafo.porId.get(delegadoId);
   if (!delegado || delegado.estado !== "activo") {
     return { ok: false, verdict: "error", trabajo: "", relPath: "", error: `Delegado ${delegadoId} no disponible` };
+  }
+
+  // Puerta del broker: se autorizan los tres usos del paso antes de gastar un
+  // spawn (delegar al nodo, que el nodo escriba su trabajo y que lo entregue al
+  // juez). Si algo se niega o queda pendiente, no se ejecuta nada ni se gasta en
+  // un paso que después no se podría cerrar.
+  const usos: Array<[string, string, UsoAutorizado]> = [
+    [orquestador.id, "delega", autorizarUso(root, orquestador.id, "delega", DELEGA_CONTRACT)],
+    [delegado.id, "editar", autorizarUso(root, delegado.id, "editar", EDITAR_CONTRACT)],
+    [delegado.id, "delega", autorizarUso(root, delegado.id, "delega", DELEGA_CONTRACT)],
+  ];
+  const bloqueos = usos.map(([agente, tool, uso]) => motivoBloqueo(agente, tool, uso)).filter((m): m is string => !!m);
+  if (bloqueos.length) {
+    return { ok: false, verdict: "error", trabajo: "", relPath: "", error: `run bloqueado por el broker: ${bloqueos.join("; ")}` };
   }
 
   // Paso 2: El delegado hace el trabajo

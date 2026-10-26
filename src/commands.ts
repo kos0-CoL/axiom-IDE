@@ -178,11 +178,15 @@ function calcularRonda(dir: string): number {
 }
 
 function informarRondaAgente(dir: string, id: string, ronda: number, maxRondas: number, r: { hechas: number; pass: number; fail: number; fallos: string[] }, tras: any[]): void {
+  // Una ronda bloqueada por el broker no crea trabajo, así que el directorio
+  // puede no existir: el informe es justo lo que hay que dejar por escrito.
+  mkdirSync(dir, { recursive: true });
   const report = `# Informe ronda ${id} (agente)\n\nIntentos: ${ronda}/${maxRondas}\nTrabajo+juez: ${r.hechas} tarea(s)\nVeredictos: ${r.pass} pass, ${r.fail} fail\nFallo(s): ${r.fallos.join("; ") || "ninguno"}\nQuedan sin evidencia: ${tras.map((t: any) => t.id).join(", ") || "ninguna"}\n\n> Los artefactos del agente son datos revisables (juez=agente en verification.md). Un humano puede re-verificar con axiom verify.\n`;
   writeFileSync(join(dir, `informe-ronda-${ronda}.md`), report);
 }
 
 function informarRonda(dir: string, id: string, ronda: number, maxRondas: number, pendientes: any[]): void {
+  mkdirSync(dir, { recursive: true });
   const report = `# Informe ronda ${id}\n\nIntentos: ${ronda}/${maxRondas}\nSin evidencia: ${pendientes.map((t: any) => t.id).join(", ")}\nCausa: falta verification.md con hash.\nPróximo: axiom verify <task> pass|fail antes de reintentar.\n`;
   writeFileSync(join(dir, `informe-ronda-${ronda}.md`), report);
   console.log(`run ${id}: BLOQUEADO ronda ${ronda}/${maxRondas} — ${pendientes.length} sin evidencia. Informe en informe-ronda-${ronda}.md`);
