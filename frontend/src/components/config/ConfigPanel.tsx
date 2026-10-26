@@ -5,6 +5,10 @@ import { useModulos } from '@/hooks/useModules';
 import { useStaging } from '@/hooks/useStaging';
 import { Card, Button, Input, Select, Chip, CardGrid, CardField } from '@/components/common';
 
+function cablearModulo(nombre: string, descripcion: string) {
+  window.location.href = `/chat?modo=build&skill=module-builder&texto=${encodeURIComponent('cablear el módulo ' + nombre + ': ' + (descripcion || ''))}`;
+}
+
 type ConfigTab = 'adapters' | 'telegram' | 'modules' | 'staging';
 
 export function ConfigPanel() {
@@ -85,15 +89,48 @@ export function ConfigPanel() {
           </div>
         )}
         {activeTab === 'modules' && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="p-3 bg-gray-800/50 border border-gray-700 flex items-center justify-between">
-                <span className="text-sm font-medium">adapters</span>
-                <input type="checkbox" defaultChecked className="w-5 h-5 accent-red-500" />
+          modulos && modulos.modulos ? (
+            <div className="space-y-3">
+              {(modulos.modulos as any[]).map((m: any) => {
+                const sinCablear = !m.cableado;
+                return (
+                  <div key={m.nombre} className={`p-4 bg-gray-900 border border-gray-700 rounded-none ${sinCablear ? 'border-l-2 border-red-500 pl-3' : ''}`}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2 flex-1">
+                        <span className="text-sm font-mono font-medium text-white">{m.nombre}</span>
+                        <span className="text-xs text-gray-400">v{(m.version as string) || '0.0.0'}</span>
+                        {sinCablear && <span className="chip chip-error">SIN cablear</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" defaultChecked={m.enabled !== false} className="w-5 h-5 accent-red-500" />
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-400 mb-2">{(m.descripcion as string) || ''}</p>
+                    <div className="flex flex-wrap gap-2 text-xs text-gray-500 mb-3">
+                      <span>Config: {(m.configFile as string) || '—'}</span>
+                      <span>Superficie: {((m.superficie as string[]) || []).join(', ') || '—'}</span>
+                      <span>Compat: {(m.compat as string) || '—'}</span>
+                    </div>
+                    {sinCablear && (
+                      <div className="flex gap-2">
+                        <Button variant="primary" size="sm" onClick={() => cablearModulo(m.nombre as string, (m.descripcion as string) || '')}>
+                          Cablear
+                        </Button>
+                        <Button variant="secondary" size="sm" disabled>Esqueleto</Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="flex justify-end pt-2">
+                <Button variant="secondary" size="sm">Crear esqueleto</Button>
               </div>
             </div>
-            <button className="px-4 py-2 bg-red-500 text-white rounded-none">Crear esqueleto</button>
-          </div>
+          ) : (
+            <div className="p-4 bg-gray-900 border border-gray-700 rounded-none text-sm text-gray-400">
+              Cargando módulos…
+            </div>
+          )
         )}
         {activeTab === 'staging' && (
           <div className="space-y-4">

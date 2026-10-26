@@ -1,0 +1,15 @@
+{
+  "name": "kanban",
+  "version": "0.1.0",
+  "axiom": "^0.9",
+  "scope": "global",
+  "default": false,
+  "description": "Tablero de tareas por estado: columnas (pendiente, implementado, verificado, bloqueado) con las tareas de SQLite y el spec de cada una. Solo lectura.",
+  "contracts": ["kanban.columnas"],
+  "transports": ["cli", "web"],
+  "patterns": ["fail-closed"],
+  "config_file": "kanban.config.json",
+  "panel": { "tipo": "lista" },
+  "editables": ["manifest.json", "index.ts", "config.ts"],
+  "cli": ["module datos kanban"]
+}

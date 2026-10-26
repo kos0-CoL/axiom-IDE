@@ -122,9 +122,9 @@ export function ponerUrl(root: string, u?: string): string {
 }
 
 export function ponerTimeoutMs(root: string, ms?: string): string {
-  if (ms === undefined) return "uso: axiom adapters timeout <ms 100-120000>";
+  if (ms === undefined) return "uso: axiom adapters timeout <ms 100-600000>";
   const n = parseInt(ms, 10);
-  if (!Number.isInteger(n) || n < 100 || n > 120000) return `timeout inválido: ${ms} (entero 100-120000)`;
+  if (!Number.isInteger(n) || n < 100 || n > 600000) return `timeout inválido: ${ms} (entero 100-600000)`;
   const cur = loadConfig(root);
   if (!cur.ok) return `config inválida (fail closed): ${cur.error}`;
   saveConfig(root, { ...cur.config, timeoutMs: n });
@@ -144,7 +144,7 @@ export function ponerMaxChars(root: string, n?: string): string {
 export async function spawn(
   root: string,
   task: string,
-  override: { timeoutMs?: number; maxChars?: number; key?: string } = {},
+  override: { timeoutMs?: number; maxChars?: number; key?: string; onDelta?: (texto: string) => void } = {},
 ): Promise<SpawnResult> {
   const r = loadConfig(root);
   if (!r.ok) return { ok: false, error: `config inválida (fail closed): ${r.error}`, ms: 0, proveedor: "?", model: "?" };
@@ -230,7 +230,7 @@ export async function spawn(
   }
   if (c.proveedor === "litellm") return spawnLiteLLM(baseUrlDe(c), c.model, task, key, budget);
   const extra: Record<string, string> = c.proveedor === "openrouter" ? { "HTTP-Referer": "http://127.0.0.1/", "X-Title": "Axiom" } : {};
-  const s = await spawnOpenAICompat(c.proveedor, baseUrlDe(c), c.model, task, key, budget, extra);
+  const s = await spawnOpenAICompat(c.proveedor, baseUrlDe(c), c.model, task, key, budget, extra, override.onDelta);
   // Key bien formada pero rechazada (revocada/de otra cuenta): el 401 de
   // OpenRouter llega sin pista; se lo explicamos en el propio error.
   if (!s.ok && s.error && /Missing Authentication header/i.test(s.error)) s.error += " — OpenRouter no reconoce esta key: crea una sk-or-v1-… en openrouter.ai/keys y guárdala en Configuración";

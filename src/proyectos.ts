@@ -7,6 +7,112 @@ import { openDb } from "./store.js";
 // La web crea la carpeta (specs, políticas, SQLite) y cambia a ella sin reiniciar.
 
 const RECIENTES_FILE = ".axiom-recientes.json";
+
+// Skills que el esqueleto deja listas: el chat las usa con [enfoque skill].
+const SKILLS_DEFECTO: { id: string; desc: string; cuerpo: string }[] = [
+  { id: "plan", desc: "planificación", cuerpo: "Produce planes numerados, cortos y verificables: una línea por paso, cada paso con su criterio de aceptación. No escribe código: planifica." },
+  { id: "implementar", desc: "implementación de código", cuerpo: "Escribe código coherente con el stack del proyecto. Prefiere archivos nuevos salvo que el cambio exija reemplazo; anuncia qué archivos toca y qué criterio cumple." },
+  { id: "verify", desc: "verificación con evidencia", cuerpo: "Verifica con evidencia real: comando ejecutado, salida relevante y veredicto. Sin cmd+sha+veredicto el resultado es no verificado." },
+  { id: "review", desc: "revisión de cambios", cuerpo: "Revisa cada cambio en dos ejes: Standards (¿respeta las reglas del repo?) y Spec (¿cumple lo pedido?). No re-ranquea ni Cambia requisitos." },
+  { id: "evidence", desc: "evidencias", cuerpo: "Registra evidencias verificables: comando, salida, sha y fecha. Nada de afirmaciones sin prueba." },
+  { id: "policy", desc: "políticas y límites", cuerpo: "Aplica policies.global.json y project.json: techos de rondas, tokens y llamadas; herramientas permitidas y riesgo de cada acción." },
+  { id: "broker", desc: "decisiones del broker", cuerpo: "Decide aprobaciones de riesgo: operaciones grandes requieren aprobación explícita del humano; sin respuesta no hay aprobación." },
+  { id: "sandbox", desc: "ejecución aislada", cuerpo: "Ejecuta comandos en entorno aislado cuando el riesgo lo indique; nunca desde el canal de transporte." },
+];
+
+function skillMarkdown(s: { id: string; desc: string; cuerpo: string }): string {
+  return `# SKILL: ${s.id}
+
+Objetivo: ${s.desc}.
+
+## Cómo trabajar con esta skill
+${s.cuerpo}
+
+## Formato de salida
+- Concreta, sin prosa de relleno.
+- Cada afirmación acompañada de su evidencia o criterio de aceptación.
+`;
+}
+
+function readmeDefecto(nom: string): string {
+  return `# ${nom}
+
+Proyecto Axiom (harness SDD). Este esqueleto se crea listo para trabajar:
+
+ fracking- \`specs/active/\` — specs, planes y tareas por_iteración (spec.md / plan.md / tasks.md).
+- \`skills/\` — 8 skills con descriptors (plan, implementar, verify, review…).
+- \`agents.config.json\` — grafo de orquestación (orquestador → nodos → especializados).
+- \`PRODUCT.md\` / \`TECH.md\` — visión de producto y decisiones técnicas.
+- \`docs/decisions/\` — ADRs.
+
+Edítilos a mano cuando cambie el rumbo; el chat los usa como contexto.`;
+}
+
+function productDefecto(nom: string): string {
+  return `# PRODUCT — ${nom}
+
+## Problema
+<quién sufre qué, hoy, sin este producto>
+
+## Usuario objetivo
+<segmento concreto>
+
+## Propuesta de valor
+<qué cambia para el usuario>
+
+## Alcance actual (MVP)
+1. <capacidad esencial 1>
+2. <capacidad esencial 2>
+
+## Fuera de alcance (ahora)
+- <cosas que explícitamente no toca esta fase>
+
+## Métricas
+- <cómo se mide que funciona>`;
+}
+
+function techDefecto(nom: string): string {
+  return `# TECH — ${nom}
+
+## Stack
+- <lenguaje, framework, base de datos>
+
+## Estructura
+- <carpetas clave y qué vive en cada una>
+
+## Convenciones
+- <naming, estilo de commits, manejo de errores>
+
+## Entorno
+- <cómo correr local: install, dev, test>
+
+## Riesgos técnicos
+- <deudas o límites conocidos>`;
+}
+
+function agentsConfigDefecto(nom: string): Record<string, unknown> {
+  return {
+    nombre: nom,
+    agentes: [
+      { id: "orquestador", rol: "orquestador", skills: ["policy", "broker"], instrucciones: "Divide el trabajo por skill, delega y consolida. No ejecuta tareas especializadas por sí mismo." },
+      { id: "planificador", rol: "nodo", skills: ["plan"], instrucciones: "Recibe el objetivo y produce el plan numerado." },
+      { id: "implementador", rol: "nodo", skills: ["implementar"], instrucciones: "Ejecuta el plan en archivos del workspace; anuncia cada archivo tocado." },
+      { id: "verificador", rol: "nodo", skills: ["verify", "evidence"], instrucciones: "Prueba con comandos reales y registra evidencias." },
+      { id: "revisor", rol: "nodo", skills: ["review"], instrucciones: "Doble eje: Standards y Spec. No aprueba sin evidencia." },
+      { id: "cazador-fallos", rol: "especializado", skills: ["silent-failures", "error-propagation"], instrucciones: "Caza fallos silenciosos: catches vacíos, fallbacks peligrosos, errores no propagados. Reporta ubicación + fallo concreto." },
+      { id: "reparador-build", rol: "especializado", skills: ["build-fix", "minimal-diff"], instrucciones: "Arregla errores de build/tipos con cambios mínimos; sin refactors ni cambios arquitectónicos." },
+    ],
+    aristas: [
+      { de: "orquestador", a: "planificador", tipo: "delega" },
+      { de: "orquestador", a: "implementador", tipo: "delega" },
+      { de: "orquestador", a: "verificador", tipo: "delega" },
+      { de: "implementador", a: "verificador", tipo: "delega" },
+      { de: "verificador", a: "revisor", tipo: "comunica" },
+      { de: "orquestador", a: "cazador-fallos", tipo: "escala" },
+      { de: "orquestador", a: "reparador-build", tipo: "delega" },
+    ],
+  };
+}
 const MAX_RECIENTES = 10;
 
 export function baseProyectos(): string {
@@ -57,6 +163,8 @@ export function asegurarProyecto(path: string): { ok: true } | { ok: false; erro
     mkdirSync(join(path, "docs", "decisions"), { recursive: true });
     const ponDefecto = (rel: string, contenido: string): void => {
       const f = join(path, rel);
+      const dir = f.slice(0, f.lastIndexOf("/"));
+      if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
       if (!existsSync(f)) writeFileSync(f, contenido);
     };
     const nom = path.split("/").filter(Boolean).pop() ?? "proyecto";
@@ -69,6 +177,45 @@ export function asegurarProyecto(path: string): { ok: true } | { ok: false; erro
       "project.json",
       JSON.stringify({ tools: {}, presupuesto: { tokens: 50000, calls: 200 } }, null, 2) + "\n",
     );
+    // Esqueleto legible y completo desde el día 1: README, docs de producto,
+    // grafo de agentes con skills reales y sus descriptors. Idempotente: nunca
+    // pisa lo que ya existe.
+    ponDefecto("README.md", readmeDefecto(nom) + "\n");
+    ponDefecto("PRODUCT.md", productDefecto(nom) + "\n");
+    ponDefecto("TECH.md", techDefecto(nom) + "\n");
+    ponDefecto(
+      "AGENTS.md",
+      `# AGENTS.md
+
+Reglas del harness en este proyecto:
+- Global > proyecto; sin evidencia no hay verificado ni aceptado.
+- Specs en specs/active/<id>/{spec,plan,tasks}.md; decisiones en docs/decisions/.
+- Skills en skills/<nombre>/SKILL.md: el chat usa [enfoque skill] para dirigir la respuesta.
+- El grafo de agentes vive en agents.config.json (orquestador → nodos → especializados).
+- No commitear axiom.db ni secretos. Sin respuesta del proveedor no hay aprobación.
+
+Comandos útiles (axiom CLI):
+- axiom spec|plan|tasks|verify|run — ciclo SDD del preset.
+- axiom serve <puerto> — servidor web (chat, ajustes, módulos).
+` + "\n",
+    );
+    ponDefecto("agents.config.json", JSON.stringify(agentsConfigDefecto(nom), null, 2) + "\n");
+    for (const s of SKILLS_DEFECTO) {
+      ponDefecto(join("skills", s.id, "SKILL.md"), skillMarkdown(s) + "\n");
+    }
+    ponDefecto("docs/decisions/ADR-0001-inicio.md", `# ADR-0001 — Inicio del proyecto
+
+Fecha: ${new Date().toISOString().slice(0, 10)}
+
+## Contexto
+Proyecto creado por Axiom con el esqueleto SDD por defecto.
+
+## Decisión
+Se adopta specs/active + docs/decisions + skills como estructura de trabajo.
+
+## Consecuencias
+Los planes aprobados y sus evidencias quedan versionables junto al código.
+` + "\n");
     const db = openDb(path);
     db.close();
     return { ok: true };

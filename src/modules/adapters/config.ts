@@ -12,7 +12,7 @@ export const AdaptersConfig = z.object({
   proveedor: Proveedor.default("off"),
   model: z.string().min(1).max(128).default("llama3.1"),
   baseUrl: z.string().url().max(256).optional(),
-  timeoutMs: z.number().int().min(100).max(120000).default(30000),
+  timeoutMs: z.number().int().min(100).max(600000).default(30000),
   maxChars: z.number().int().min(256).max(100000).default(8000),
 });
 export type AdaptersConfig = z.infer<typeof AdaptersConfig>;
@@ -78,7 +78,7 @@ export function configPath(root: string): string {
 
 export function loadConfig(root: string): { ok: true; config: AdaptersConfig } | { ok: false; error: string } {
   const p = configPath(root);
-  if (!existsSync(p)) return { ok: true, config: { proveedor: "off", model: "llama3.1", timeoutMs: 30000, maxChars: 8000 } };
+  if (!existsSync(p)) return { ok: true, config: { proveedor: "off", model: "llama3.1", timeoutMs: 120000, maxChars: 8000 } };
   try {
     const r = AdaptersConfig.safeParse(JSON.parse(readFileSync(p, "utf8")));
     if (!r.success) return { ok: false, error: `adapters.config.json inválido: ${r.error.issues.map((i) => i.message).join("; ")}` };

@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
-    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/*.test.js",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/*.test.js && npm run check:seeds",
+    "check:seeds": "node scripts/check-seeds.mjs",
     "dev": "npx tsx src/cli.ts",
     "lint:spectral": "spectral lint openapi.json -r .spectral.json"
   },

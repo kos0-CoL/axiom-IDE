@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { openDb } from "./store.js";
 
 // Sesiones de chat por proyecto (F2): historial persistente en SQLite.
@@ -25,6 +27,7 @@ export interface Mensaje {
   model: string;
   skill: string;
   ms: number;
+  tokens: number;
   created_at: string;
 }
 
@@ -92,14 +95,73 @@ export function archivarSesion(root: string, id: string, archivada = true): { ok
   return { ok: true, msg: archivada ? "sesión archivada" : "sesión restaurada" };
 }
 
+// Borrado de sesión con cascada: aparte de mensajes y sesión, borra las specs
+// generadas por esa sesión (propuestas → artifacts → specs + carpetas en disco).
+// Idempotente en la parte de archivos y honesta en lo que devuelve.
+const ID_SPEC_OK = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+export function borrarSesion(root: string, id: string): { ok: true; msg: string; specs: string[] } | Fail {
+  const cur = obtenerSesion(root, id);
+  if (!cur.ok) return cur;
+  const db = openDb(root);
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    // Specs generadas por esta sesión: propuestas → artifacts → spec_id.
+    const filas = db.prepare("SELECT DISTINCT pa.spec_id FROM plan_artifacts pa JOIN plan_propuestas pp ON pp.id=pa.proposal_id WHERE pp.session_id=?").all(id) as { spec_id: string }[];
+    const specIds: string[] = [];
+    for (const f of filas) {
+      if (typeof f.spec_id === "string" && ID_SPEC_OK.test(f.spec_id)) specIds.push(f.spec_id);
+    }
+    const marcador = specIds.map(() => "?").join(",");
+    // Primero borro artifacts (referencian propuestas y specs); luego propuestas.
+    const cArt = marcador ? db.prepare("DELETE FROM plan_artifacts WHERE spec_id IN (" + marcador + ")").run(...specIds).changes : 0;
+    const cProp = db.prepare("DELETE FROM plan_propuestas WHERE session_id=?").run(id).changes;
+    for (const sid of specIds) {
+      db.prepare("DELETE FROM specs WHERE id=?").run(sid);
+      db.prepare("DELETE FROM tasks WHERE spec_id=?").run(sid);
+    }
+    const cMsg = db.prepare("DELETE FROM chat_messages WHERE session_id=?").run(id).changes;
+    db.prepare("DELETE FROM chat_sessions WHERE id=?").run(id);
+    db.exec("COMMIT");
+    // Archivos al final, fuera de la transacción: el disco no es transaccional.
+    // Solo carpetas hijas directas con nombre validado (nada de ../ con IDs con formato de slug).
+    let tocadas = 0;
+    for (const sid of specIds) {
+      const dir = join(root, "specs", "active", sid);
+      try {
+        rmSync(dir, { recursive: true, force: true });
+        tocadas++;
+      } catch {
+        /* mejor esfuerzo: la DB ya quedó limpia */
+      }
+    }
+    return { ok: true, msg: `sesión borrada: ${cMsg} mensajes y ${specIds.length} specs (${tocadas} carpetas)`, specs: specIds };
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch { /* sin transacción abierta */ }
+    return { ok: false, error: `no se pudo borrar la sesión: ${e instanceof Error ? e.message : e}` };
+  } finally {
+    db.close();
+  }
+}
+
 export function mensajesDe(root: string, id: string, limit = 200): { ok: true; mensajes: Mensaje[] } | Fail {
   const cur = obtenerSesion(root, id);
   if (!cur.ok) return cur;
   const n = Number.isInteger(limit) && limit > 0 && limit <= 500 ? limit : 200;
   const db = openDb(root);
-  const rows = db.prepare("SELECT id,session_id,rol,texto,proveedor,model,skill,ms,created_at FROM chat_messages WHERE session_id=? ORDER BY id ASC LIMIT ?").all(id, n) as unknown as Mensaje[];
+  const rows = db.prepare("SELECT id,session_id,rol,texto,proveedor,model,skill,ms,tokens,created_at FROM chat_messages WHERE session_id=? ORDER BY id ASC LIMIT ?").all(id, n) as unknown as Mensaje[];
   db.close();
   return { ok: true, mensajes: rows };
+}
+
+// Uso agregado de la sesión para el header del chat: tokens totales y llamadas con respuesta.
+export function usoSesion(root: string, id: string): { ok: true; tokens: number; llamadas: number } | Fail {
+  const cur = obtenerSesion(root, id);
+  if (!cur.ok) return cur;
+  const db = openDb(root);
+  const r = db.prepare("SELECT COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(CASE WHEN rol='asistente' THEN 1 ELSE 0 END),0) AS llamadas FROM chat_messages WHERE session_id=?").get(id) as { tokens: number; llamadas: number };
+  db.close();
+  return { ok: true, tokens: r.tokens ?? 0, llamadas: r.llamadas ?? 0 };
 }
 
 export function guardarMensaje(
@@ -107,7 +169,7 @@ export function guardarMensaje(
   sessionId: string,
   rol: "usuario" | "asistente" | "sistema",
   texto: string,
-  meta: { proveedor?: string; model?: string; skill?: string; ms?: number } = {},
+  meta: { proveedor?: string; model?: string; skill?: string; ms?: number; tokens?: number } = {},
 ): { ok: true; id: number } | Fail {
   if (rol !== "usuario" && rol !== "asistente" && rol !== "sistema") return { ok: false, error: "rol inválido" };
   const t = texto.trim();
@@ -115,8 +177,8 @@ export function guardarMensaje(
   const cur = obtenerSesion(root, sessionId);
   if (!cur.ok) return cur;
   const db = openDb(root);
-  const r = db.prepare("INSERT INTO chat_messages(session_id,rol,texto,proveedor,model,skill,ms,created_at) VALUES(?,?,?,?,?,?,?,?)").run(
-    sessionId, rol, t.slice(0, 20000), meta.proveedor ?? "", meta.model ?? "", (meta.skill ?? "").slice(0, 64), meta.ms ?? 0, ahora(),
+  const r = db.prepare("INSERT INTO chat_messages(session_id,rol,texto,proveedor,model,skill,ms,tokens,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(
+    sessionId, rol, t.slice(0, 20000), meta.proveedor ?? "", meta.model ?? "", (meta.skill ?? "").slice(0, 64), meta.ms ?? 0, meta.tokens && meta.tokens > 0 ? Math.round(meta.tokens) : 0, ahora(),
   );
   db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(ahora(), sessionId);
   db.close();

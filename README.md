@@ -11,7 +11,7 @@ Un harness tradicional envuelve un bucle de LLM (`prompt → spawn → output`) 
 | **Broker de políticas** | Decisión `global AND project`, riesgo alto → `ask` (aprobación humana), techo de rondas/tokens/calls con reserva del 20% | El agente decide solo qué herramientas usar |
 | **Grafo de orquestación** | Orquestador, nodos, especializados y subagentes con skills, presupuestos y handoffs auditados | Un prompt suelto sin equipo ni límites |
 | **Canales** | CLI + Web + **Telegram** como canal de aprobación remota (allowlist fail-closed) | Solo interactúas desde la terminal local |
-| **Módulos versionados** | `adapters`, `agents`, `grafos`, `speckit`, `telegram`… apagados por defecto, compat por versión | El core hay que tocarlo para extenderlo |
+| **Módulos versionados** | `adapters`, `agents`, `grafos`, `kanban`, `speckit`, `telegram`… apagados por defecto, compat por versión | El core hay que tocarlo para extenderlo |
 | **Proveedor conmutable** | Un solo proveedor LLM activo (ollama/litellm/openai/anthropic/google/openrouter) por config; cambiar no toca specs (AXM-062) | El vendor queda incrustado en el código |
 
 > **Regla de la casa:** sin evidencia (cmd + sha + veredicto) no hay verificado/aceptado; sin respuesta no hay aprobación; Telegram es canal, no juez.
@@ -71,6 +71,7 @@ axiom module compat
 | `adapters` | 0.1.0 | Proveedor LLM conmutable (off/ollama/litellm/openai/anthropic/google/openrouter) | texto |
 | `agents` | 0.1.0 | Grafo de orquestación: orquestador, nodos, especializados, subagentes, skills | — |
 | `grafos` | 0.1.0 | **Intended** (agents.config.json) vs **Executed** (handoffs + evidencias) | grafo |
+| `kanban` | 0.1.0 | Tablero de tareas por estado (SQLite `tasks` agrupadas en columnas) | lista |
 | `speckit` | 0.1.0 | Convergencia SDD: specs ↔ tasks ↔ evidencias pass | lista |
 | `telegram` | 0.3.0 | Canal Telegram: notificaciones y aprobaciones (broker decide) | — |
 

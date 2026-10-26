@@ -3,5 +3,13 @@
   "presupuesto": {
     "tokens": 50000,
     "calls": 200
-  }
+  },
+  "allow": [
+    "specs/**",
+    "docs/**",
+    ".specify/**",
+    "src/**",
+    "*.json",
+    "*.md"
+  ]
 }

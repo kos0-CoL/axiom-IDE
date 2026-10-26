@@ -12,9 +12,11 @@ CREATE TABLE IF NOT EXISTS consumo(unit TEXT PRIMARY KEY, tokens INTEGER, calls 
 CREATE TABLE IF NOT EXISTS bloqueos(id TEXT PRIMARY KEY, task_id TEXT, causa TEXT);
 CREATE TABLE IF NOT EXISTS uso_log(id INTEGER PRIMARY KEY AUTOINCREMENT, prompt INTEGER, respuesta INTEGER, total INTEGER, fuente TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS chat_sessions(id TEXT PRIMARY KEY, titulo TEXT, modo TEXT, archivada INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT);
-CREATE TABLE IF NOT EXISTS chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, rol TEXT, texto TEXT, proveedor TEXT, model TEXT, skill TEXT, ms INTEGER, created_at TEXT);
+CREATE TABLE IF NOT EXISTS chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, rol TEXT, texto TEXT, proveedor TEXT, model TEXT, skill TEXT, ms INTEGER, tokens INTEGER NOT NULL DEFAULT 0, created_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, id);
 CREATE TABLE IF NOT EXISTS plan_propuestas(id TEXT PRIMARY KEY, session_id TEXT, texto TEXT, estado TEXT, created_at TEXT, decided_at TEXT);
+CREATE TABLE IF NOT EXISTS build_proposals(id TEXT PRIMARY KEY, session_id TEXT NOT NULL, changes_json TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS plan_artifacts(proposal_id TEXT PRIMARY KEY, spec_id TEXT NOT NULL);
 `;
 
 export function openDb(projectRoot: string): DatabaseSync {
@@ -22,6 +24,8 @@ export function openDb(projectRoot: string): DatabaseSync {
   const db = new DatabaseSync(join(projectRoot, "axiom.db"));
   db.exec(SCHEMA_V1);
   db.prepare("INSERT OR IGNORE INTO meta(k,v) VALUES('schema','1')").run();
+  // Migración: DBs creadas antes de la columna tokens del chat.
+  try { db.prepare("SELECT tokens FROM chat_messages LIMIT 1").get(); } catch { db.exec("ALTER TABLE chat_messages ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0"); }
   return db;
 }
 
