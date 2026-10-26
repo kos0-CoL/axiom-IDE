@@ -295,3 +295,106 @@ export function textoSkills(root: string): string {
   if (d.ignorados.length) lineas.push(`  ignorados (id inválido): ${d.ignorados.join(", ")}`);
   return lineas.join("\n");
 }
+
+// --- Detalle editable de un skill --------------------------------------------
+// Misma costura que agents: la web pide un skill, lo edita como campos y en el
+// modo avanzado ve el SKILL.md completo. guardarSkill valida longitudes y exige
+// cuerpo: si algo no cuadra no se escribe nada.
+
+export interface CampoDetalleSkill {
+  k: string;
+  etiqueta: string;
+  tipo: "texto" | "area";
+  ayuda: string;
+  valor: string;
+}
+
+export interface DatosDetalleSkill {
+  id: string;
+  bruto: string;
+  campos: CampoDetalleSkill[];
+  avanzado: { titulo: string; ayuda: string; boton: string };
+  nota: string;
+}
+
+export type ResultadoDetalleSkill =
+  | { ok: true; detalle: DatosDetalleSkill }
+  | { ok: false; error: string };
+
+export function detalleModulo(root: string, id?: string): ResultadoDetalleSkill {
+  const n = (id ?? "").trim();
+  if (!n) return { ok: false, error: "id de skill requerido" };
+  const r = leerSkill(root, n);
+  if (!r.ok) return { ok: false, error: r.error };
+  const s = r.skill;
+  const bruto = s.crudo ?? skillMarkdown({ id: s.id, descripcion: s.descripcion, cuerpo: s.cuerpo });
+  const origen =
+    s.origen === "override"
+      ? "override del catálogo (el archivo del proyecto reemplaza el cuerpo de código)"
+      : s.origen === "proyecto"
+        ? "propio del proyecto (no está en el catálogo)"
+        : "catálogo de código, sin archivo propio todavía";
+  return {
+    ok: true,
+    detalle: {
+      id: s.id,
+      bruto,
+      campos: [
+        {
+          k: "descripcion",
+          etiqueta: "Descripción",
+          tipo: "texto",
+          ayuda: `Una línea: para qué sirve. Máximo ${MAX_DESCRIPCION} caracteres; es lo que se ve en el selector del chat.`,
+          valor: s.descripcion,
+        },
+        {
+          k: "cuerpo",
+          etiqueta: "Cuerpo",
+          tipo: "area",
+          ayuda: `Instrucciones que recibe el agente. Máximo ${MAX_CUERPO} caracteres. Sin cuerpo el skill no enseña nada y no se guarda.`,
+          valor: s.cuerpo,
+        },
+      ],
+      avanzado: {
+        titulo: "Modo avanzado — archivo SKILL.md",
+        ayuda: "El markdown completo tal como queda en el archivo. Al guardar se normaliza al formato de Axiom (título, objetivo y cuerpo).",
+        boton: "Guardar SKILL.md",
+      },
+      nota: `Origen: ${origen}. Ruta: ${s.ruta}. Guardar crea o actualiza el archivo del proyecto, que sobreescribe el catálogo y es exactamente lo que recibe el prompt.`,
+    },
+  };
+}
+
+export function guardarDetalleModulo(
+  root: string,
+  entrada: { id?: unknown; cambios?: unknown; bruto?: unknown },
+): { ok: true; msg: string } | { ok: false; error: string } {
+  const id = typeof entrada.id === "string" ? entrada.id.trim() : "";
+  if (!id) return { ok: false, error: "id de skill requerido" };
+  if (!SKILL_ID_OK.test(id)) return { ok: false, error: "id inválido: a-z, 0-9 y - (1-64), empieza por letra" };
+
+  let descripcion: unknown;
+  let cuerpo: unknown;
+  if (entrada.bruto !== undefined) {
+    if (typeof entrada.bruto !== "string") return { ok: false, error: "bruto debe ser texto markdown" };
+    const p = parseSkillMd(entrada.bruto);
+    if (!p.descripcion || !p.cuerpo) {
+      return { ok: false, error: "el SKILL.md necesita descripción y cuerpo: conserva «# SKILL: <id>», «Objetivo: …» y el texto de la skill" };
+    }
+    descripcion = p.descripcion;
+    cuerpo = p.cuerpo;
+  } else {
+    const c = entrada.cambios;
+    if (!c || typeof c !== "object" || Array.isArray(c)) return { ok: false, error: "cambios (objeto) o bruto (markdown) requerido" };
+    const cambios = c as Record<string, unknown>;
+    for (const k of Object.keys(cambios)) {
+      if (k !== "descripcion" && k !== "cuerpo") return { ok: false, error: `campo no editable: ${k}` };
+    }
+    descripcion = cambios.descripcion;
+    cuerpo = cambios.cuerpo;
+  }
+
+  const r = guardarSkill(root, id, { descripcion, cuerpo });
+  if (!r.ok) return { ok: false, error: r.error ?? "no se pudo guardar" };
+  return { ok: true, msg: `${r.msg ?? `skill ${id} guardado`} · ${r.ruta ?? rutaRelativa(id)}` };
+}

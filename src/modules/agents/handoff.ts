@@ -4,6 +4,7 @@
 import { openDb } from "../../store.js";
 import { check } from "../../broker.js";
 import { loadAgents } from "./config.js";
+import { declaracionDeHerramienta } from "./declaracion.js";
 import type { ToolContract } from "../../contracts.js";
 
 const DELEGA_CONTRACT: ToolContract = {
@@ -45,7 +46,9 @@ export function handoff(root: string, de?: string, a?: string, tarea?: string): 
   if (d.estado !== "activo") return `${a} no está activo (${d.estado})`;
   const arista = r.config.aristas.find((e) => e.de === de && e.a === a && (e.tipo === "delega" || e.tipo === "escala"));
   if (!arista) return `sin arista de delegación ${de} → ${a} (usa \`agents link ${de} ${a} delega\`)`;
-  const c = check(root, "delega", DELEGA_CONTRACT);
+  // Quien delega es el agente `de`: la herramienta se autoriza con SU
+  // declaración, no solo con la política del proyecto.
+  const c = check(root, "delega", DELEGA_CONTRACT, declaracionDeHerramienta(root, de, "delega"));
   tabla(root);
   const db = openDb(root);
   if (c.decision === "deny") {

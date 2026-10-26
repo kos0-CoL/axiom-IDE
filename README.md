@@ -8,7 +8,7 @@ Un harness tradicional envuelve un bucle de LLM (`prompt → spawn → output`) 
 |------|------------------|--------------------------|
 | **Ciclo SDD** | `spec → plan → tasks → verify → run` con artefactos Markdown por spec | No tiene memoria de qué se pidió ni de qué quedó demostrado |
 | **Evidencia con firma** | Cada `verify pass` guarda cmd + hash SHA-256 + juez en `verification-<task>.md` | Un "verde" es solo la palabra del modelo |
-| **Broker de políticas** | Decisión `global AND project`, riesgo alto → `ask` (aprobación humana), techo de rondas/tokens/calls con reserva del 20% | El agente decide solo qué herramientas usar |
+| **Broker de políticas** | Decisión `global AND project ∧ declaración del agente` (deny > ask > allow), riesgo alto → `ask` (aprobación humana), techo de rondas/tokens/calls con reserva del 20% | El agente decide solo qué herramientas usar o saltarse la política |
 | **Grafo de orquestación** | Orquestador, nodos, especializados y subagentes con skills, presupuestos y handoffs auditados | Un prompt suelto sin equipo ni límites |
 | **Canales** | CLI + Web + **Telegram** como canal de aprobación remota (allowlist fail-closed) | Solo interactúas desde la terminal local |
 | **Módulos versionados** | `adapters`, `agents`, `grafos`, `kanban`, `speckit`, `telegram`… apagados por defecto, compat por versión | El core hay que tocarlo para extenderlo |
@@ -49,6 +49,7 @@ axiom ui                         # TUI: orquestación + trabajo
 
 ```bash
 axiom check                      # preflight: dependencias, config, techo, SQLite
+axiom check editar --agente implementador   # decisión para esa herramienta y ese agente
 axiom validate-spec              # specs y tasks contra esquema
 axiom validate-openapi           # spec ↔ router (web.ts)
 npm run lint:spectral            # lint OpenAPI con Spectral
@@ -66,10 +67,16 @@ axiom module datos adapters
 axiom module compat
 ```
 
+El estado de cada módulo se deriva de los exports de su entrada, no de una lista fija: `esqueleto` (solo `NOMBRE`/`estadoTexto`), `datos` (expone `datosModulo(root)` y nada más) o `completo` (expone superficie propia, con o sin `datosModulo`). `cableado` se mantiene como alias de «no es esqueleto».
+
+**Vista del módulo.** «Abrir vista» pinta lo que el módulo devuelve en `datosModulo(root)`, nunca el JSON crudo: valores sueltos como pares clave/valor, listas de objetos como tablas (con filtro cuando pasan de seis filas), listas simples como chips, `columnas` como tablero y `intended`/`executed` como SVG. La cabecera muestra la descripción del manifiesto y «Qué expone», con los nombres que exporta la entrada real (la API publica `exporta`). Un módulo sin `datosModulo` no abre vista: el botón queda deshabilitado con el motivo en el título.
+
+**Detalle editable.** Si un módulo exporta `detalleModulo(root, id)` y `guardarDetalleModulo(root, entrada)`, las filas de sus tablas que traen `id` son clicables: se abre un formulario con la explicación de cada campo y un modo avanzado con el JSON exacto de la entidad. El guardado valida antes de escribir (zod, formato de cada campo, skills existentes) y responde 422 dejando el archivo intacto si algo no cuadra. `agents` es el primer módulo que lo implementa: cada agente declara sus `herramientas` como `tool=allow|ask|deny`, y una celda vacía significa que ese agente no declara ninguna, no que el campo falte.
+
 | Módulo | Versión | Descripción | Panel Web |
 |--------|---------|-------------|-----------|
 | `adapters` | 0.1.0 | Proveedor LLM conmutable (off/ollama/litellm/openai/anthropic/google/openrouter) | texto |
-| `agents` | 0.1.0 | Grafo de orquestación: orquestador, nodos, especializados, subagentes, skills | — |
+| `agents` | 0.1.0 | Grafo de orquestación: orquestador, nodos, especializados, subagentes, skills | lista |
 | `skills` | 0.1.0 | Catálogo editable: `skills/<id>/SKILL.md` sobreescribe el catálogo y alimenta el prompt | lista |
 | `grafos` | 0.1.0 | **Intended** (agents.config.json) vs **Executed** (handoffs + evidencias) | grafo |
 | `kanban` | 0.1.0 | Tablero de tareas por estado (SQLite `tasks` agrupadas en columnas) | lista |
@@ -236,6 +243,13 @@ La web solo muestra presencia ("guardada" / "ausente"); los valores nunca se ree
 - **Global** (`policies.global.json`): herramientas + techo global (rondas, tokens, calls).
 - **Proyecto** (`project.json`): herramientas + presupuesto por proyecto.
 - **Decisión efectiva** = `global AND project` (ausencia = deny por defecto).
+- **Cota del agente**: se cruza con lo que ese agente declara en `agents.config.json`
+  (`herramientas: [{tool, acceso}]`). La más estricta gana (`deny > ask > allow`), así que
+  una declaración `allow` no concede nada que la política niegue, y una herramienta **no
+  declarada se deniega**. `ask` del agente abre una aprobación; al decidirla se relee su
+  declaración: un `deny` posterior la cierra como `denegada-por-agente`.
+- **`delega`** es la herramienta del handoff: la declara el agente que delega y el broker la
+  autoriza con él. Los alias históricos se normalizan (`read`→`leer`, `terminal`→`ejecutar`).
 - **Riesgo alto** (terminal, publish, network) → `ask`: requiere aprobación humana, aquí o por Telegram.
 - **Techo**: la reserva del 20% es para verificación; al agotarse, el orquestador se detiene (fail closed).
 

@@ -1,6 +1,7 @@
 // Módulos (F7 + Fase 3): registro, enable/disable por proyecto, esqueletos y superficie validada.
-// El catálogo cableado espeja src/modules/*/manifest.json; los esqueletos
-// creados con `module new` se detectan por escaneo (mejor esfuerzo).
+// El catálogo espeja src/modules/*/manifest.json; los módulos creados con
+// `module new` se detectan por escaneo y su estado se deriva de la entrada real
+// (exports del archivo que se sirve), no de una lista fija.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PropuestaModulo } from "./modules/module-builder.js";
@@ -13,10 +14,18 @@ export interface ModuloInfo {
   version: string;
   descripcion: string;
   configFile: string;
+  // Derivado de los exports de la entrada: ver `estadoCableadoModulo`.
+  estado: EstadoCableado;
+  // Compat: `estado !== "esqueleto"`. Se mantiene para clientes antiguos.
   cableado: boolean;
   enabled: boolean;
   vista: VistaModulo;
   superficie: string[];
+  // Nombres que exporta la entrada real (lo que el módulo ofrece al núcleo).
+  exporta: string[];
+  // El módulo sabe abrir una de sus entidades y guardarla (exporta
+  // detalleModulo y guardarDetalleModulo). Solo entonces sus filas son clicables.
+  detalle: boolean;
   // Tipo de panel que el módulo sabe pintar (del manifiesto, `panel: {tipo}`).
   // Nulo = solo vista genérica. Los tipos los pinta la web sin tocar el núcleo.
   panel: string | null;
@@ -30,8 +39,8 @@ export interface ModuloInfo {
 export type VistaModulo = "solo" | "columna" | "barra";
 export const VISTAS: VistaModulo[] = ["solo", "columna", "barra"];
 
-// Espejo de los manifest.json cableados (versión + descriptor).
-const CATALOGO: Omit<ModuloInfo, "enabled" | "cableado" | "vista" | "superficie" | "panel" | "compat">[] = [
+// Espejo de los manifest.json nativos (versión + descriptor).
+const CATALOGO: Omit<ModuloInfo, "enabled" | "estado" | "cableado" | "vista" | "superficie" | "exporta" | "detalle" | "panel" | "compat">[] = [
   {
     nombre: "telegram",
     version: "0.3.0",
@@ -118,28 +127,134 @@ function escribirEstado(root: string, estado: Record<string, EstadoModulo>): voi
   writeFileSync(join(root, STATE_FILE), JSON.stringify(estado, null, 2) + "\n");
 }
 
-// Nombres conocidos: catálogo + esqueletos detectados en disco.
-export function nombresConocidos(): { nombre: string; cableado: boolean }[] {
-  const out = CATALOGO.map((c) => ({ nombre: c.nombre, cableado: true }));
+// Nombres conocidos: catálogo + módulos detectados en disco (manifest propio).
+function entradasConocidas(): string[] {
+  const out = CATALOGO.map((c) => c.nombre);
   const dir = dirModulosSrc();
   if (dir) {
     try {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         if (!e.isDirectory() || !NOMBRE_OK.test(e.name)) continue;
-        if (out.some((o) => o.nombre === e.name)) continue;
+        if (out.includes(e.name)) continue;
         try {
           const m = JSON.parse(readFileSync(join(dir, e.name, "manifest.json"), "utf8")) as { name?: unknown };
           if (m.name !== e.name) continue;
         } catch {
           continue;
         }
-        out.push({ nombre: e.name, cableado: false });
+        out.push(e.name);
       }
     } catch {
       /* mejor esfuerzo */
     }
   }
   return out;
+}
+
+// Estado real del módulo, derivado de los exports de su entrada:
+// - esqueleto: no sirve datos ni expone superficie propia (solo NOMBRE/estadoTexto).
+// - datos: expone `datosModulo(root)` y nada más (panel genérico).
+// - completo: expone superficie propia (rutas/CLI propios), con o sin datosModulo.
+// La entrada es el archivo que se sirve (.js) o, si aún no compiló, el .ts que
+// se edita; la fuente manda sobre dist para no reportar un estado viejo.
+export type EstadoCableado = "esqueleto" | "datos" | "completo";
+export const ESTADOS_CABLEADO: EstadoCableado[] = ["esqueleto", "datos", "completo"];
+
+const EXPORTS_CONVENCION = new Set(["NOMBRE", "estadoTexto", "datosModulo"]);
+
+export function estadoSegunExports(exports: Iterable<string>, superficie = false): EstadoCableado {
+  const set = exports instanceof Set ? exports : new Set(exports);
+  const propios = superficie || [...set].some((n) => !EXPORTS_CONVENCION.has(n));
+  if (propios) return "completo";
+  return set.has("datosModulo") ? "datos" : "esqueleto";
+}
+
+interface ExportsEntrada {
+  nombres: Set<string>;
+  superficie: boolean;
+}
+
+function rutasInspeccion(nombre: string): string[] {
+  const base = dirModulo(nombre);
+  const here = dirname(fileURLToPath(import.meta.url));
+  return [
+    base ? join(base, "index.js") : undefined,
+    base ? join(base, "index.ts") : undefined,
+    join(here, "modules", nombre, "index.js"),
+    join(here, "modules", nombre, "index.ts"),
+  ].filter((c): c is string => Boolean(c));
+}
+
+function parsearExports(texto: string, ruta: string): ExportsEntrada {
+  const sf = ts.createSourceFile(ruta, texto, ts.ScriptTarget.Latest, true, ruta.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS);
+  const nombres = new Set<string>();
+  let superficie = false;
+  for (const st of sf.statements) {
+    if (ts.isExportDeclaration(st)) {
+      if (st.isTypeOnly) continue;
+      if (!st.exportClause) { superficie = true; continue; } // export * from
+      if (ts.isNamedExports(st.exportClause)) {
+        for (const el of st.exportClause.elements) {
+          if (el.isTypeOnly) continue;
+          nombres.add(el.name.text);
+          if (!EXPORTS_CONVENCION.has(el.name.text)) superficie = true;
+        }
+        continue;
+      }
+      superficie = true; // export * as ns from
+      continue;
+    }
+    if (ts.isExportAssignment(st)) { superficie = true; continue; } // export default …
+    if (!ts.canHaveModifiers(st)) continue;
+    const mods = ts.getModifiers(st);
+    if (!mods?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
+    if (ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) continue; // no existen en runtime
+    if (ts.isVariableStatement(st)) {
+      for (const d of st.declarationList.declarations) {
+        if (ts.isIdentifier(d.name)) {
+          nombres.add(d.name.text);
+          if (!EXPORTS_CONVENCION.has(d.name.text)) superficie = true;
+        } else {
+          superficie = true; // export const { … } = …
+        }
+      }
+      continue;
+    }
+    const declarado = (st as ts.DeclarationStatement).name;
+    if (declarado && ts.isIdentifier(declarado)) {
+      nombres.add(declarado.text);
+      if (!EXPORTS_CONVENCION.has(declarado.text)) superficie = true;
+    } else {
+      superficie = true; // export default function/class anónima
+    }
+  }
+  return { nombres, superficie };
+}
+
+function exportsDeEntrada(nombre: string): ExportsEntrada | undefined {
+  for (const ruta of rutasInspeccion(nombre)) {
+    try {
+      if (!existsSync(ruta)) continue;
+      return parsearExports(readFileSync(ruta, "utf8"), ruta);
+    } catch {
+      /* siguiente candidato */
+    }
+  }
+  return undefined;
+}
+
+export function estadoCableadoModulo(nombre: string): EstadoCableado {
+  if (!NOMBRE_OK.test(nombre)) return "esqueleto";
+  const exp = exportsDeEntrada(nombre);
+  if (!exp) return "esqueleto";
+  return estadoSegunExports(exp.nombres, exp.superficie);
+}
+
+export function nombresConocidos(): { nombre: string; estado: EstadoCableado; cableado: boolean }[] {
+  return entradasConocidas().map((nombre) => {
+    const estado = estadoCableadoModulo(nombre);
+    return { nombre, estado, cableado: estado !== "esqueleto" };
+  });
 }
 
 export function moduloActivo(root: string, nombre: string): boolean {
@@ -181,21 +296,30 @@ export function panelModulo(nombre: string): string | null {
 }
 
 export function listarModulos(root: string): ModuloInfo[] {
-  const conocidos = nombresConocidos();
-  const porNombre = new Map(conocidos.map((c) => [c.nombre, c.cableado]));
-  const lista: ModuloInfo[] = CATALOGO.map((c) => ({
-    ...c,
-    cableado: true,
-    enabled: moduloActivo(root, c.nombre),
-    vista: vistaModulo(root, c.nombre),
-    superficie: validarSuperficie(c.nombre).archivos,
-    panel: panelModulo(c.nombre),
-    compat: compatModulo(c.nombre).detalle,
-  }));
-  for (const [nombre, cableado] of porNombre) {
-    if (lista.some((m) => m.nombre === nombre)) continue;
+  const catalogo = new Map(CATALOGO.map((c) => [c.nombre, c]));
+  const lista: ModuloInfo[] = [];
+  for (const nombre of entradasConocidas()) {
+    const estado = estadoCableadoModulo(nombre);
+    const exporta = [...(exportsDeEntrada(nombre)?.nombres ?? [])].sort();
+    const comun = {
+      nombre,
+      estado,
+      cableado: estado !== "esqueleto",
+      enabled: moduloActivo(root, nombre),
+      vista: vistaModulo(root, nombre),
+      superficie: validarSuperficie(nombre).archivos,
+      exporta,
+      detalle: exporta.includes("detalleModulo") && exporta.includes("guardarDetalleModulo"),
+      panel: panelModulo(nombre),
+      compat: compatModulo(nombre).detalle,
+    };
+    const base = catalogo.get(nombre);
+    if (base) {
+      lista.push({ ...base, ...comun });
+      continue;
+    }
     let version = "0.1.0";
-    let descripcion = "Esqueleto sin cablear: declara e implementa antes de usar.";
+    let descripcion = estado === "esqueleto" ? "Esqueleto sin implementar: exporta datosModulo(root) o su superficie antes de usarlo." : `Módulo ${nombre} sin descripción en el manifiesto.`;
     let configFile = `${nombre}.config.json`;
     try {
       const dir = dirModulosSrc();
@@ -212,7 +336,7 @@ export function listarModulos(root: string): ModuloInfo[] {
     } catch {
       /* defecto */
     }
-    lista.push({ nombre, version, descripcion, configFile, cableado, enabled: moduloActivo(root, nombre), vista: vistaModulo(root, nombre), superficie: validarSuperficie(nombre).archivos, panel: panelModulo(nombre), compat: compatModulo(nombre).detalle });
+    lista.push({ ...comun, version, descripcion, configFile });
   }
   return lista.sort((a, b) => (a.nombre < b.nombre ? -1 : 1));
 }
@@ -222,7 +346,7 @@ export function textoModulos(root: string): string {
   const lines = ["módulos:"];
   for (const m of lista) {
     const cc = compatModulo(m.nombre);
-    lines.push(`- ${m.nombre} ${m.version} [${m.enabled ? "on" : "off"}] ver:${m.vista}${m.cableado ? "" : " (esqueleto, sin cablear)"}${cc.ok ? "" : " (!)"}: ${m.descripcion}`);
+    lines.push(`- ${m.nombre} ${m.version} [${m.enabled ? "on" : "off"}] estado:${m.estado} ver:${m.vista}${cc.ok ? "" : " (!)"}: ${m.descripcion}`);
   }
   return lines.join("\n");
 }

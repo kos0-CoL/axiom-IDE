@@ -1,6 +1,7 @@
 // Módulo telegram — adaptador: correlaciona callback → broker.decide.
 // Single-use, idempotente, primera respuesta gana (lo garantiza broker por estado).
 import { check, decide } from "../../broker.js";
+import { declaracionDeAprobacion } from "../agents/declaracion.js";
 import { formatApproval, formatBloqueos, formatConsumo, formatDecision, statusText as statusBase } from "./transport.js";
 import { allowedChat } from "./auth.js";
 import { loadConfig, saveConfig } from "./config.js";
@@ -22,7 +23,7 @@ export function handleCallback(root: string, id: string, action: "approve" | "re
   const cfg = loadConfig(root);
   if (!cfg.ok) return `config inválida (fail closed): ${cfg.error}`;
   if (!allowedChat(root, chatId)) return `origen no autorizado (fail closed)`;
-  const r = decide(root, id, action === "approve", chatId ?? "cli", cfg.config.expiracionMin);
+  const r = decide(root, id, action === "approve", chatId ?? "cli", cfg.config.expiracionMin, declaracionDeAprobacion(root, id));
   return formatDecision(id, r.ok, r.msg);
 }
 

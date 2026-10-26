@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asegurarProyecto } from "../dist/proyectos.js";
 import { cuerpoSkill, loadAgents } from "../dist/modules/agents/config.js";
+import { AGENTES_SEMILLA, ARISTAS_SEMILLA } from "../dist/modules/agents/seed.js";
 
 const TIPOS = new Set(["delega", "comunica", "escala"]);
 
@@ -19,7 +20,13 @@ test("el esqueleto nuevo escribe agents.config.json que loadAgents acepta", () =
     if (carga.ok) {
       assert.equal(carga.defecto, false);
       for (const e of carga.config.aristas) assert.ok(TIPOS.has(e.tipo), `tipo sembrado inválido: ${e.tipo}`);
-      assert.equal(carga.config.aristas.length, 7);
+      assert.equal(carga.config.aristas.length, ARISTAS_SEMILLA.length);
+      // El esqueleto y el loader comparten semilla: mismos ids, mismo orden.
+      assert.deepEqual(carga.config.agentes.map((a) => a.id), AGENTES_SEMILLA.map((a) => a.id));
+      const impl = carga.config.agentes.find((a) => a.id === "implementador");
+      assert.ok(impl && impl.herramientas.some((h) => h.tool === "editar" && h.acceso === "ask"), "implementador declara editar=ask");
+      const rev = carga.config.agentes.find((a) => a.id === "revisor");
+      assert.ok(rev && rev.herramientas.every((h) => h.acceso === "allow"), "revisor no declara permisos de escritura");
     }
   } finally {
     rmSync(base, { recursive: true, force: true });
@@ -57,6 +64,8 @@ test("el seed por defecto usa los mismos ids canónicos que el esqueleto", () =>
     assert.ok(carga.ok && carga.defecto, `loadAgents no devolvió el seed por defecto: ${!carga.ok ? carga.error : ""}`);
     if (!carga.ok) return;
     const ids = carga.config.agentes.map((a) => a.id);
+    assert.deepEqual(ids, AGENTES_SEMILLA.map((a) => a.id), "el seed por defecto no coincide con la semilla del esqueleto");
+    assert.equal(carga.config.aristas.length, ARISTAS_SEMILLA.length);
     assert.ok(ids.includes("cazador-fallos"), "el seed por defecto no trae cazador-fallos");
     assert.ok(ids.includes("reparador-build"), "el seed por defecto no trae reparador-build");
     assert.ok(carga.config.aristas.some((e) => e.a === "cazador-fallos"), "sin arista hacia cazador-fallos");

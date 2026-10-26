@@ -928,7 +928,7 @@
       "get": {
         "operationId": "modulos",
         "summary": "Lista módulos con su estado por proyecto",
-        "description": "Catálogo cableado + esqueletos detectados; enabled por proyecto (modules.json, on por defecto). Apagar cierra sus rutas web (409) y su CLI.",
+        "description": "Catálogo + módulos detectados; estado (esqueleto/datos/completo) derivado de los exports de cada entrada y enabled por proyecto (modules.json, on por defecto). Apagar cierra sus rutas web (409) y su CLI.",
         "tags": [
           "chat"
         ],
@@ -1029,6 +1029,154 @@
           },
           "404": {
             "description": "Módulo desconocido, sin datos o no cargable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/modulos/detalle": {
+      "get": {
+        "operationId": "modulosDetalle",
+        "summary": "Detalle de una entidad de un módulo (campos y JSON para editar)",
+        "description": "Carga la entrada del módulo y llama a detalleModulo(root, id). Devuelve los campos con su ayuda y el objeto JSON exacto, para verlo y editarlo desde Ajustes. Sin el export o con el módulo apagado: 404/409/501 fail closed.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "nombre",
+            "in": "query",
+            "description": "Nombre del módulo",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "Id de la entidad dentro del módulo",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detalle de la entidad",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "nombre"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "nombre": {
+                      "type": "string"
+                    },
+                    "detalle": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Módulo o entidad inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Módulo deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "modulosDetalleGuardar",
+        "summary": "Guarda cambios de una entidad de un módulo",
+        "description": "Llama a guardarDetalleModulo(root, {id, cambios | bruto}). El módulo valida antes de escribir: si algo no cuadra responde 422 y el archivo queda intacto.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "nombre",
+                  "id"
+                ],
+                "properties": {
+                  "nombre": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "cambios": {
+                    "type": "object"
+                  },
+                  "bruto": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Guardado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "nombre"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "nombre": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validación fallida; no se escribió nada",
             "content": {
               "application/json": {
                 "schema": {
@@ -2060,7 +2208,25 @@
           "aprobaciones": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "tool": { "type": "string" },
+                "riesgo": { "type": "string" },
+                "estado": { "type": "string" },
+                "agente": {
+                  "type": "string",
+                  "description": "Agente que pidió la herramienta; vacío si el check no tuvo agente."
+                },
+                "declaracion": {
+                  "type": "string",
+                  "description": "allow|ask|deny que ese agente declara hoy para la herramienta; vacío si no la declara o no hay agente."
+                },
+                "declaracionTexto": {
+                  "type": "string",
+                  "description": "Resumen legible (ej. editar=ask) o el motivo por el que no se puede resolver."
+                }
+              }
             }
           },
           "usos": {
@@ -2513,6 +2679,7 @@
           "version",
           "descripcion",
           "configFile",
+          "estado",
           "cableado",
           "enabled",
           "vista",
@@ -2533,8 +2700,18 @@
           "configFile": {
             "type": "string"
           },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "esqueleto",
+              "datos",
+              "completo"
+            ],
+            "description": "Derivado de los exports de la entrada: esqueleto (solo NOMBRE/estadoTexto), datos (datosModulo sin superficie propia) o completo (superficie propia, con o sin datosModulo)"
+          },
           "cableado": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Compatibilidad: true cuando estado no es esqueleto (derivado, no una lista fija)"
           },
           "enabled": {
             "type": "boolean"
@@ -2546,6 +2723,13 @@
           "superficie": {
             "type": "array",
             "description": "Archivos declarados en editables del manifiesto",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exporta": {
+            "type": "array",
+            "description": "Nombres que exporta la entrada real del módulo (lo que ofrece al núcleo); la vista los muestra como 'Qué expone'",
             "items": {
               "type": "string"
             }

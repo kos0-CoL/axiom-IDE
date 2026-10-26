@@ -92,14 +92,15 @@ export function ConfigPanel() {
           modulos && modulos.modulos ? (
             <div className="space-y-3">
               {(modulos.modulos as any[]).map((m: any) => {
-                const sinCablear = !m.cableado;
+                const estado = (m.estado as string) || (m.cableado ? 'datos' : 'esqueleto');
+                const sinCablear = estado === 'esqueleto';
                 return (
                   <div key={m.nombre} className={`p-4 bg-gray-900 border border-gray-700 rounded-none ${sinCablear ? 'border-l-2 border-red-500 pl-3' : ''}`}>
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-center gap-2 flex-1">
                         <span className="text-sm font-mono font-medium text-white">{m.nombre}</span>
                         <span className="text-xs text-gray-400">v{(m.version as string) || '0.0.0'}</span>
-                        {sinCablear && <span className="chip chip-error">SIN cablear</span>}
+                        {sinCablear && <span className="chip chip-error">SIN implementar</span>}
                       </div>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" defaultChecked={m.enabled !== false} className="w-5 h-5 accent-red-500" />
@@ -109,6 +110,7 @@ export function ConfigPanel() {
                     <div className="flex flex-wrap gap-2 text-xs text-gray-500 mb-3">
                       <span>Config: {(m.configFile as string) || '—'}</span>
                       <span>Superficie: {((m.superficie as string[]) || []).join(', ') || '—'}</span>
+                      <span>Estado: {estado}</span>
                       <span>Compat: {(m.compat as string) || '—'}</span>
                     </div>
                     {sinCablear && (

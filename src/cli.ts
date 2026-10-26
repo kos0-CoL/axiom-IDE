@@ -65,7 +65,7 @@ else if (cmd === "status" && rest[0] === "--trace") cmdStatus(root, rest[1]);
 else if (cmd === "status") cmdStatus(root);
 else if (cmd === "validate-spec") cmdValidate(root);
 else if (cmd === "ui") cmdUi(root);
-else if (cmd === "check") cmdCheck(root, rest[0]);
+else if (cmd === "check") { const a = flagStr(rest, "--agente"); cmdCheck(root, a.resto[0], a.valor); }
 else if (cmd === "approve") cmdDecide(root, rest[0], true);
 else if (cmd === "reject") cmdDecide(root, rest[0], false);
 else if (cmd === "telegram" && rest[0] === "notify") { const chat = rest[2]; if (chat) { console.log(await notifyChat(root, rest[1] ?? "publish", chat, tgToken(root))); } else { console.log(notifyApproval(root, rest[1] ?? "publish")); } }
@@ -139,4 +139,4 @@ else if (cmd === "validate-tokens") { cmdValidateTokens(rest[0]); }
 else if (cmd === "validate-openapi") { cmdValidateOpenApi(rest[0]); }
 else if (cmd === "sandbox") { const ii = rest.indexOf("--image"); const img = ii >= 0 ? rest[ii + 1] : undefined; const userCmd = ii >= 0 ? rest.filter((_, i) => i !== ii && i !== ii + 1) : rest.slice(); const out = await sandboxRun(root, userCmd.length ? userCmd : ["echo", "sandbox-ok"], img ? { image: img } : {}); console.log(out.out); process.exit(out.code); }
 else if (cmd === "cycle") { cmdCycle(root, rest[0]); }
-else { console.log("uso: axiom [--root <dir>] <init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi|sandbox> (verify: pass|fail|error [--detalle] [--archivos]) (run: [--dry-run] [--agente]) (telegram: notify|approve|reject|bloqueos|consumo|allow|unallow|expira|config|send|bot [--once]|webhook|on|off) (adapters: config|use|model|url|timeout|maxchars|spawn) (skills: list|ver|borrar <id>) (agents: list|add|pause|skill|link|define|handoff|handoffs|experience|proponer|propuestas|ver-propuesta|aprobar-propuesta|rechazar-propuesta|snapshot) (secrets: solo via web Configuración)"); process.exit(cmd ? 1 : 0); }
+else { console.log("uso: axiom [--root <dir>] <init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi|sandbox> (verify: pass|fail|error [--detalle] [--archivos]) (run: [--dry-run] [--agente]) (check: [<tool>] [--agente <id>]) (telegram: notify|approve|reject|bloqueos|consumo|allow|unallow|expira|config|send|bot [--once]|webhook|on|off) (adapters: config|use|model|url|timeout|maxchars|spawn) (skills: list|ver|borrar <id>) (agents: list|add|pause|skill|link|define|handoff|handoffs|experience|proponer|propuestas|ver-propuesta|aprobar-propuesta|rechazar-propuesta|snapshot) (secrets: solo via web Configuración)"); process.exit(cmd ? 1 : 0); }

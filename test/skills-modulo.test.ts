@@ -13,6 +13,8 @@ import {
   ignoradosSkills,
   datosSkills,
   parseSkillMd,
+  detalleModulo as detalleSkill,
+  guardarDetalleModulo as guardarDetalleSkill,
 } from "../dist/modules/skills/index.js";
 import { SKILLS, skillMarkdown } from "../dist/modules/agents/skills.js";
 import { construirPromptAgente } from "../dist/modules/agents/ejecucion.js";
@@ -189,6 +191,73 @@ test("el editor recibe el contenido crudo del archivo", () => {
       assert.equal(leido.skill.ruta, "skills/mi-skill/SKILL.md");
       assert.ok(readFileSync(join(base, "skills", "mi-skill", "SKILL.md"), "utf8").includes("c"));
     }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("el detalle de un skill trae campos, ayuda y el SKILL.md completo", () => {
+  const base = temp();
+  try {
+    const r = detalleSkill(base, "plan");
+    assert.ok(r.ok, r.ok ? "" : r.error);
+    if (!r.ok) return;
+    assert.deepEqual(r.detalle.campos.map((c) => c.k), ["descripcion", "cuerpo"]);
+    for (const c of r.detalle.campos) assert.ok(c.ayuda.length > 10, `sin ayuda en ${c.k}`);
+    assert.match(r.detalle.bruto, /# SKILL: plan/);
+    assert.equal(r.detalle.campos[1].valor, SKILLS.find((s) => s.id === "plan")!.cuerpo);
+    assert.equal(r.detalle.avanzado.boton, "Guardar SKILL.md");
+    assert.match(r.detalle.nota, /skills\/plan\/SKILL\.md/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("guardar el detalle escribe el SKILL.md del proyecto y pasa a override", () => {
+  const base = temp();
+  try {
+    const r = guardarDetalleSkill(base, { id: "plan", cambios: { descripcion: "plan propio", cuerpo: "Cuerpo del proyecto." } });
+    assert.ok(r.ok, r.ok ? "" : r.error);
+    const s = listarSkills(base).find((x) => x.id === "plan");
+    assert.equal(s?.origen, "override");
+    assert.equal(cuerpoEfectivo(base, "plan"), "Cuerpo del proyecto.");
+    assert.match(readFileSync(join(base, "skills", "plan", "SKILL.md"), "utf8"), /plan propio/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("el modo avanzado acepta el markdown del usuario y lo normaliza", () => {
+  const base = temp();
+  try {
+    const md = "# SKILL: nuevo\n\nObjetivo: prueba.\n\n## Cómo trabajar con esta skill\nHaz la cosa.\n";
+    const r = guardarDetalleSkill(base, { id: "nuevo", bruto: md });
+    assert.ok(r.ok, r.ok ? "" : r.error);
+    assert.equal(cuerpoEfectivo(base, "nuevo"), "Haz la cosa.");
+    assert.match(readFileSync(join(base, "skills", "nuevo", "SKILL.md"), "utf8"), /^# SKILL: nuevo/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("un skill inválido se rechaza sin escribir nada", () => {
+  const base = temp();
+  try {
+    const antes = listarSkills(base).length;
+    const casos: { entrada: { cambios?: Record<string, unknown>; bruto?: unknown }; espera: RegExp }[] = [
+      { entrada: { cambios: { descripcion: "d", cuerpo: "" } }, espera: /cuerpo requerido/ },
+      { entrada: { cambios: { descripcion: "", cuerpo: "c" } }, espera: /descripción requerida/ },
+      { entrada: { cambios: { id: "otro" } }, espera: /campo no editable/ },
+      { entrada: { bruto: "# SKILL: x\n" }, espera: /necesita descripción y cuerpo/ },
+      { entrada: { bruto: 42 }, espera: /texto markdown/ },
+    ];
+    for (const c of casos) {
+      const r = guardarDetalleSkill(base, { id: "plan", ...c.entrada });
+      assert.equal(r.ok, false, JSON.stringify(c.entrada));
+      if (!r.ok) assert.match(r.error, c.espera);
+    }
+    assert.ok(!existsSync(join(base, "skills", "plan", "SKILL.md")), "no se creó archivo");
+    assert.equal(listarSkills(base).length, antes);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

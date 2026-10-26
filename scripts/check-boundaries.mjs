@@ -21,8 +21,9 @@ const rules = {
   // sessions importa solo el texto del baseline anti-inyección (sin lógica de agents).
   "sessions.ts": ["./store.js", "./modules/agents/defensa.js"],
   // proyectos importa el catálogo de skills (datos puros: schema zod + textos) para
-  // escribir skills/<id>/SKILL.md desde una sola fuente. No toca lógica de agents.
-  "proyectos.ts": ["./store.js", "./modules/agents/skills.js"],
+  // escribir skills/<id>/SKILL.md desde una sola fuente, y la semilla de agentes
+  // (datos puros) para que el esqueleto y el loader compartan el mismo grafo.
+  "proyectos.ts": ["./store.js", "./modules/agents/skills.js", "./modules/agents/seed.js"],
   "modulos.ts": ["./modules/module-builder.js"],
   "runmark.ts": ["./store.js"],
   "experience.ts": ["./store.js"],

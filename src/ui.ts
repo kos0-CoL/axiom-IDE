@@ -23,18 +23,21 @@ export function renderOrquestacion(root: string): string {
   return out.join("\n");
 }
 
-export interface AprobacionView { id: string; tool: string; riesgo: string; estado: string; created_at: string; decided_by: string; decided_at: string }
+export interface AprobacionView { id: string; tool: string; riesgo: string; estado: string; created_at: string; decided_by: string; decided_at: string; agente: string }
 
 // JSON para la web: mismas consultas que el texto (criterio UI-SPEC 5: sin divergencia).
 export interface UsoView { prompt: number; respuesta: number; total: number; fuente: string; created_at: string }
 export function datosOrquestacion(root: string): { techo: { rondas: number; tokens: number; calls: number }; consumo: { tokens: number; calls: number }; usos: UsoView[]; tareas: { estado: string; n: number }[]; aprobaciones: AprobacionView[] } {
   const db = openDb(root);
   const tasks = db.prepare("SELECT estado, COUNT(*) c FROM tasks GROUP BY estado").all() as any[];
+  // `agente` identifica a quién se le pidió la herramienta; en bases anteriores
+  // a esa columna se degrada a la consulta sin ella en vez de perder las filas.
   let aprob: any[] = [];
-  try {
-    aprob = db.prepare("SELECT id, tool, riesgo, estado, created_at, decided_by, decided_at FROM aprobaciones ORDER BY created_at DESC LIMIT 20").all() as any[];
-  } catch {
-    try { aprob = db.prepare("SELECT id, tool, riesgo, estado, created_at FROM aprobaciones ORDER BY created_at DESC LIMIT 20").all() as any[]; } catch { aprob = []; }
+  for (const sql of [
+    "SELECT id, tool, riesgo, estado, created_at, decided_by, decided_at, agente FROM aprobaciones ORDER BY created_at DESC LIMIT 20",
+    "SELECT id, tool, riesgo, estado, created_at FROM aprobaciones ORDER BY created_at DESC LIMIT 20",
+  ]) {
+    try { aprob = db.prepare(sql).all() as any[]; break; } catch { /* columna ausente en base vieja */ }
   }
   const { global } = loadPolicies(root);
   db.close();
@@ -43,7 +46,7 @@ export function datosOrquestacion(root: string): { techo: { rondas: number; toke
   return {
     techo: global.techo, consumo, usos,
     tareas: tasks.map((t) => ({ estado: t.estado, n: t.c })),
-    aprobaciones: aprob.map((a) => ({ id: a.id, tool: a.tool, riesgo: a.riesgo, estado: a.estado, created_at: a.created_at ?? "", decided_by: a.decided_by ?? "", decided_at: a.decided_at ?? "" })),
+    aprobaciones: aprob.map((a) => ({ id: a.id, tool: a.tool, riesgo: a.riesgo, estado: a.estado, created_at: a.created_at ?? "", decided_by: a.decided_by ?? "", decided_at: a.decided_at ?? "", agente: a.agente ?? "" })),
   };
 }
 

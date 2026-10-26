@@ -21,7 +21,7 @@ import { crear, evaluar, rollback, marcarEstable, listar, remove, existeComp, ex
 import { sandboxRun, imagenPermitida } from "./sandbox.js";
 import { startWeb, validateTokens, defaultWebSource } from "./web.js";
 import { spawn as adaptersSpawn, formatSpawn } from "./adapters.js";
-import { rondaAgenteGrafo } from "./modules/agents/index.js";
+import { rondaAgenteGrafo, declaracionDeHerramienta, declaracionDeAprobacion } from "./modules/agents/index.js";
 
 export function activeDir(root: string, id: string): string {
   return join(root, "specs", "active", id);
@@ -156,7 +156,7 @@ export function cmdVerify(root: string, taskId?: string, verdictArg?: string, to
 
 export function cmdDecide(root: string, id: string | undefined, ok: boolean): void {
   if (!id) { console.error("uso: axiom approve|reject <id>"); process.exit(1); }
-  const r = decide(root, id, ok, "cli");
+  const r = decide(root, id, ok, "cli", 30, declaracionDeAprobacion(root, id));
   console.log(r.msg);
   if (!r.ok) process.exit(2);
 }
@@ -358,15 +358,18 @@ export function preflight(root: string): { ok: boolean; lineas: string[] } {
   return { ok: lineas.every((l) => l.startsWith("ok")), lineas };
 }
 
-export function cmdCheck(root: string, tool?: string): void {
+export function cmdCheck(root: string, tool?: string, agente?: string): void {
   if (!tool) {
     const p = preflight(root);
     for (const l of p.lineas) console.log(`check ${l}`);
     if (!p.ok) process.exit(2);
     return;
   }
-  const r = check(root, tool);
-  console.log(`check ${tool}: ${r.decision} (riesgo=${r.riesgo}) — ${r.motivo}${r.id ? ` id=${r.id}` : ""}`);
+  // Con --agente la decisión se cruza con lo que ese agente declara.
+  const declaracion = agente ? declaracionDeHerramienta(root, agente, tool) : undefined;
+  const r = check(root, tool, undefined, declaracion);
+  const quien = agente ? ` (agente ${agente})` : "";
+  console.log(`check ${tool}${quien}: ${r.decision} (riesgo=${r.riesgo}) — ${r.motivo}${r.id ? ` id=${r.id}` : ""}`);
   if (r.decision === "deny") process.exit(2);
 }
 

@@ -8,6 +8,7 @@
   "transports": ["cli", "web"],
   "patterns": ["single-orchestrator", "fail-closed"],
   "config_file": "agents.config.json",
-  "editables": ["manifest.json", "index.ts", "config.ts", "handoff.ts", "ejecucion.ts", "skills.ts", "defensa.ts"],
+  "panel": { "tipo": "lista" },
+  "editables": ["manifest.json", "index.ts", "config.ts", "declaracion.ts", "handoff.ts", "ejecucion.ts", "skills.ts", "defensa.ts", "seed.ts"],
   "cli": ["agents list", "agents add <id> <rol>", "agents pause <id> [activo|pausado]", "agents skill <id> <skill>", "agents link <de> <a> [tipo]", "agents define <id> <campo> <valor>"]
 }

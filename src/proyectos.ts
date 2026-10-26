@@ -5,6 +5,7 @@ import { openDb } from "./store.js";
 // Catálogo único de skills (datos puros: id + descripción + cuerpo). El esqueleto
 // escribe skills/<id>/SKILL.md desde aquí; no hay segunda lista que se desincronice.
 import { SKILLS, skillMarkdown } from "./modules/agents/skills.js";
+import { rosterSemilla } from "./modules/agents/seed.js";
 
 // Proyectos = carpetas en el servidor, cada una con su propio store.SQLite.
 // La web crea la carpeta (specs, políticas, SQLite) y cambia a ella sin reiniciar.
@@ -18,8 +19,8 @@ function readmeDefecto(nom: string): string {
 
 Proyecto Axiom (harness SDD). Este esqueleto se crea listo para trabajar:
 
- fracking- \`specs/active/\` — specs, planes y tareas por_iteración (spec.md / plan.md / tasks.md).
-- \`skills/\` — 8 skills con descriptors (plan, implementar, verify, review…).
+- \`specs/active/\` — specs, planes y tareas por iteración (spec.md / plan.md / tasks.md).
+- \`skills/\` — ${SKILLS.length} skills con cuerpo (plan, implementar, verify, review…).
 - \`agents.config.json\` — grafo de orquestación (orquestador → nodos → especializados).
 - \`PRODUCT.md\` / \`TECH.md\` — visión de producto y decisiones técnicas.
 - \`docs/decisions/\` — ADRs.
@@ -70,27 +71,10 @@ function techDefecto(nom: string): string {
 }
 
 function agentsConfigDefecto(nom: string): Record<string, unknown> {
-  return {
-    nombre: nom,
-    agentes: [
-      { id: "orquestador", rol: "orquestador", skills: ["policy", "broker"], instrucciones: "Divide el trabajo por skill, delega y consolida. No ejecuta tareas especializadas por sí mismo." },
-      { id: "planificador", rol: "nodo", skills: ["plan"], instrucciones: "Recibe el objetivo y produce el plan numerado." },
-      { id: "implementador", rol: "nodo", skills: ["implementar"], instrucciones: "Ejecuta el plan en archivos del workspace; anuncia cada archivo tocado." },
-      { id: "verificador", rol: "nodo", skills: ["verify", "evidence"], instrucciones: "Prueba con comandos reales y registra evidencias." },
-      { id: "revisor", rol: "nodo", skills: ["review"], instrucciones: "Doble eje: Standards y Spec. No aprueba sin evidencia." },
-      { id: "cazador-fallos", rol: "especializado", skills: ["silent-failures", "error-propagation"], instrucciones: "Caza fallos silenciosos: catches vacíos, fallbacks peligrosos, errores no propagados. Reporta ubicación + fallo concreto." },
-      { id: "reparador-build", rol: "especializado", skills: ["build-fix", "minimal-diff"], instrucciones: "Arregla errores de build/tipos con cambios mínimos; sin refactors ni cambios arquitectónicos." },
-    ],
-    aristas: [
-      { de: "orquestador", a: "planificador", tipo: "delega" },
-      { de: "orquestador", a: "implementador", tipo: "delega" },
-      { de: "orquestador", a: "verificador", tipo: "delega" },
-      { de: "implementador", a: "verificador", tipo: "delega" },
-      { de: "verificador", a: "revisor", tipo: "comunica" },
-      { de: "orquestador", a: "cazador-fallos", tipo: "escala" },
-      { de: "orquestador", a: "reparador-build", tipo: "delega" },
-    ],
-  };
+  // Misma semilla que usa el loader sin agents.config.json (seed.ts): un proyecto
+  // nuevo y un proyecto sin config ya no cargan grafos distintos.
+  const roster = rosterSemilla();
+  return { nombre: nom, agentes: roster.agentes, aristas: roster.aristas };
 }
 const MAX_RECIENTES = 10;
 

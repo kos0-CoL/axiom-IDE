@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z, ZodIssue } from "zod";
+import { rosterSemilla } from "./seed.js";
 
 // Herramienta declarada por un agente: capacidad con requisito de permiso.
 // La autorización efectiva la decide el broker (global>proyecto); esto solo declara la intención.
@@ -88,26 +89,10 @@ function mensajeZod(error: z.ZodError): string {
   return visibles.join("; ") + extra;
 }
 
+// El grafo por defecto sale de la semilla única (seed.ts), la misma que usa el
+// esqueleto de proyecto: antes eran dos listas distintas y divergían.
 function defecto(): AgentsConfig {
-  return {
-    agentes: [
-    { id: "orquestador", rol: "orquestador", modelo: "hereda-proveedor", estado: "activo", skills: ["plan", "broker"], instrucciones: "", herramientas: [] },
-    { id: "nodo-code", rol: "nodo", modelo: "hereda-proveedor", estado: "activo", skills: ["implementar", "verify"], instrucciones: "", herramientas: [] },
-    { id: "nodo-review", rol: "nodo", modelo: "hereda-proveedor", estado: "activo", skills: ["review", "evidence"], instrucciones: "", herramientas: [] },
-    { id: "esp-seguridad", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["policy", "sandbox"], instrucciones: "", herramientas: [] },
-    // Nombres canónicos (iguales a los del esqueleto del proyecto): un solo id por nodo.
-    { id: "cazador-fallos", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["silent-failures", "error-propagation"], instrucciones: "Caza fallos silenciosos: catches vacíos, fallbacks peligrosos, errores no propagados. Reporta ubicación + fallo concreto.", herramientas: [] },
-    { id: "reparador-build", rol: "especializado", modelo: "hereda-proveedor", estado: "activo", skills: ["build-fix", "minimal-diff"], instrucciones: "Arregla errores de build/tipos con cambios mínimos; sin refactors ni cambios arquitectónicos.", herramientas: [] },
-    ],
-    aristas: [
-      { de: "orquestador", a: "nodo-code", tipo: "delega" },
-      { de: "orquestador", a: "nodo-review", tipo: "delega" },
-      { de: "nodo-code", a: "esp-seguridad", tipo: "escala" },
-      { de: "nodo-review", a: "orquestador", tipo: "comunica" },
-      { de: "orquestador", a: "cazador-fallos", tipo: "escala" },
-      { de: "orquestador", a: "reparador-build", tipo: "delega" },
-    ],
-  };
+  return rosterSemilla();
 }
 
 // Tipos de arista que sembró un esqueleto viejo con valores inválidos.

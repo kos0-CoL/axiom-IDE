@@ -21,10 +21,16 @@ export interface AprobacionView {
   id: string;
   tool: string;
   riesgo: 'bajo' | 'medio' | 'alto';
-  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'expirada' | 'denegada-por-politica';
+  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'expirada' | 'denegada-por-politica' | 'denegada-por-agente' | 'denegada-sin-agente';
   created_at: string;
   decided_by: string;
   decided_at: string;
+  /** Agente que pidió la herramienta; vacío si el check no tuvo agente. */
+  agente: string;
+  /** Declaración vigente del agente para esa herramienta ('' si no la declara). */
+  declaracion: 'allow' | 'ask' | 'deny' | '';
+  /** Resumen legible (ej. editar=ask) o el motivo por el que no se resuelve. */
+  declaracionTexto: string;
 }
 
 export interface Trabajo {
@@ -156,6 +162,7 @@ export interface ModuloInfo {
   version: string;
   descripcion: string;
   configFile: string;
+  estado: 'esqueleto' | 'datos' | 'completo';
   cableado: boolean;
   enabled: boolean;
   vista: 'solo' | 'columna' | 'barra';

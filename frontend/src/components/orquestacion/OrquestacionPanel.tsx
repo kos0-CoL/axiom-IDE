@@ -123,16 +123,23 @@ export function OrquestacionPanel() {
             {data.aprobaciones.slice(0, 5).map((a: any, i: number) => (
               <div key={i} className="flex items-center justify-between p-2 bg-bg-tertiary rounded">
                 <div>
-                  <span className="font-mono text-xs text-muted">{a.id}</span>
-                  <span className="text-xs text-muted mx-2">({a.tool})</span>
-                  <span className={cn(
-                    'px-2 py-0.5 text-xs rounded font-mono',
-                    a.riesgo === 'alto' ? 'bg-error/10 text-error border border-error/30' 
-                    : a.riesgo === 'medio' ? 'bg-warning/10 text-warning border border-warning/30' 
-                    : 'bg-success/10 text-success border border-success/30'
-                  )}>
-                    {a.riesgo.toUpperCase()}
-                  </span>
+                  <div>
+                    <span className="font-mono text-xs text-muted">{a.id}</span>
+                    <span className="text-xs text-muted mx-2">({a.tool})</span>
+                    <span className={cn(
+                      'px-2 py-0.5 text-xs rounded font-mono',
+                      a.riesgo === 'alto' ? 'bg-error/10 text-error border border-error/30' 
+                      : a.riesgo === 'medio' ? 'bg-warning/10 text-warning border border-warning/30' 
+                      : 'bg-success/10 text-success border border-success/30'
+                    )}>
+                      {a.riesgo.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted mt-0.5">
+                    {a.agente
+                      ? `Agente: ${a.agente} — ${a.declaracionTexto || 'sin declaración vigente'}`
+                      : 'Sin agente: solo decide la política'}
+                  </div>
                 </div>
                 <span className="text-xs text-muted">{a.estado}</span>
               </div>
