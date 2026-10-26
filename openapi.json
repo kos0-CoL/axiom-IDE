@@ -780,7 +780,7 @@
       "post": {
         "operationId": "decide",
         "summary": "Aprueba o rechaza vía broker (audita quién=web)",
-        "description": "Delega en broker.decide: single-use, primera respuesta gana, expiración configurable.",
+        "description": "Delega en broker.decide: single-use, primera respuesta gana, expiración configurable. Al aprobar revalida la política y la declaración vigentes del agente; rechazar no revalida (no concede nada) y queda como rechazada. Responde el estado resultante (estado) para que la web muestre lo que hizo el broker: 200 si la fila quedó aprobada o rechazada, 409 si se denegó, expiró o ya estaba decidida.",
         "tags": [
           "broker"
         ],
@@ -806,7 +806,7 @@
             }
           },
           "409": {
-            "description": "Ya decidida, inexistente o expirada",
+            "description": "Denegada por política o por el agente, ya decidida, inexistente o expirada — el campo estado dice cuál",
             "content": {
               "application/json": {
                 "schema": {
@@ -2327,6 +2327,14 @@
           },
           "msg": {
             "type": "string"
+          },
+          "estado": {
+            "type": "string",
+            "description": "Cómo quedó la aprobación: aprobada o rechazada si se decidió; denegada-por-politica, denegada-por-agente, denegada-sin-agente, expirada, el estado previo si ya estaba decidida, o no-existe. Solo lo devuelve POST /api/decide."
+          },
+          "aplicada": {
+            "type": "boolean",
+            "description": "true si esta llamada escribió el estado final de la fila; false si ya estaba decidida o no existe. Solo lo devuelve POST /api/decide."
           }
         }
       },

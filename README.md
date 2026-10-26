@@ -246,8 +246,9 @@ La web solo muestra presencia ("guardada" / "ausente"); los valores nunca se ree
 - **Cota del agente**: se cruza con lo que ese agente declara en `agents.config.json`
   (`herramientas: [{tool, acceso}]`). La más estricta gana (`deny > ask > allow`), así que
   una declaración `allow` no concede nada que la política niegue, y una herramienta **no
-  declarada se deniega**. `ask` del agente abre una aprobación; al decidirla se relee su
-  declaración: un `deny` posterior la cierra como `denegada-por-agente`.
+  declarada se deniega**. `ask` del agente abre una aprobación; al **aprobarla** se relee
+  su declaración: un `deny` posterior la cierra como `denegada-por-agente`. Rechazar no
+  revalida cotas (no concede nada): queda registrada como `rechazada` con quien la rechazó.
 - **`delega`** es la herramienta del handoff: la declara el agente que delega y el broker la
   autoriza con él. Los alias históricos se normalizan (`read`→`leer`, `terminal`→`ejecutar`).
 - **Riesgo alto** (terminal, publish, network) → `ask`: requiere aprobación humana, aquí o por Telegram.

@@ -70,6 +70,13 @@ export function datosAprobacion(root: string, id: string): { tool: string; agent
   }
 }
 
+// `estado` es cómo quedó la fila, que no es lo mismo que `ok`: rechazar es una
+// decisión tomada (`ok: false`, estado `rechazada`), mientras que denegar por
+// política o agente o llegar tarde es el broker negándose (`denegada-*`, `expirada`).
+// `aplicada` dice si esta llamada escribió el estado final (false = ya estaba
+// decidida o no existe), para que la web no pinte en verde una fila que no tocó.
+export interface DecideResult { ok: boolean; msg: string; estado: string; aplicada: boolean }
+
 export function decide(
   root: string,
   id: string,
@@ -77,34 +84,39 @@ export function decide(
   quien?: string,
   expiraMin = 30,
   agente?: DeclaracionAgente,
-): { ok: boolean; msg: string } {
+): DecideResult {
   const db = openDb(root);
   prepararTabla(db);
   const row = db.prepare("SELECT * FROM aprobaciones WHERE id=?").get(id) as any;
-  if (!row) { db.close(); return { ok: false, msg: `aprobación ${id} no existe` }; }
-  const cerrar = (estado: string, msg: string) => {
+  if (!row) { db.close(); return { ok: false, msg: `aprobación ${id} no existe`, estado: "no-existe", aplicada: false }; }
+  const cerrar = (estado: string, msg: string): DecideResult => {
     db.prepare("UPDATE aprobaciones SET estado=?, decided_by=?, decided_at=? WHERE id=?").run(estado, quien ?? "sistema", new Date().toISOString(), id);
     db.close();
-    return { ok: false, msg };
+    return { ok: false, msg, estado, aplicada: true };
   };
   const ageMin = (Date.now() - new Date(row.created_at).getTime()) / 60000;
   if (ageMin > expiraMin) return cerrar("expirada", `aprobación ${id} expirada (>${expiraMin}min) = deny`);
-  if (row.estado !== "pendiente") { db.close(); return { ok: false, msg: `aprobación ${id} ya ${row.estado}` }; }
-  // revalida política vigente al momento de decidir (no la de solicitud)
-  const r = effectiveAllow(root, row.tool);
-  if (r.decision === "deny") return cerrar("denegada-por-politica", `denegada por política vigente: ${r.motivo}`);
-  // Segunda cota: el agente que la pidió debe seguir declarándola. Un `ask`
-  // del agente es justo lo que esta decisión humana resuelve; `deny` no.
-  if (row.agente) {
-    if (!agente) return cerrar("denegada-sin-agente", `aprobación ${id}: el agente ${row.agente} no está declarado (fail closed)`);
-    if ("error" in agente) return cerrar("denegada-por-agente", `aprobación ${id}: agente ${row.agente} → ${agente.error} (fail closed)`);
-    if (agente.id !== row.agente) return cerrar("denegada-por-agente", `aprobación ${id}: la declaración de ${agente.id} no corresponde a ${row.agente} (fail closed)`);
-    if (agente.acceso === "deny") return cerrar("denegada-por-agente", `aprobación ${id}: el agente ${agente.id} declara ${agente.tool}=deny`);
+  if (row.estado !== "pendiente") { db.close(); return { ok: false, msg: `aprobación ${id} ya ${row.estado}`, estado: String(row.estado), aplicada: false }; }
+  // Rechazar no concede nada: la fila se cierra como `rechazada` con el humano que
+  // la rechazó, sin revalidar cotas (revalidar solo puede convertir un rechazo en
+  // una denegación del broker y falsear la auditoría). Aprobar sí revalida: manda
+  // la política y la declaración vigentes, no las del momento de la solicitud.
+  if (aprueba) {
+    const r = effectiveAllow(root, row.tool);
+    if (r.decision === "deny") return cerrar("denegada-por-politica", `denegada por política vigente: ${r.motivo}`);
+    // Segunda cota: el agente que la pidió debe seguir declarándola. Un `ask`
+    // del agente es justo lo que esta decisión humana resuelve; `deny` no.
+    if (row.agente) {
+      if (!agente) return cerrar("denegada-sin-agente", `aprobación ${id}: el agente ${row.agente} no está declarado (fail closed)`);
+      if ("error" in agente) return cerrar("denegada-por-agente", `aprobación ${id}: agente ${row.agente} → ${agente.error} (fail closed)`);
+      if (agente.id !== row.agente) return cerrar("denegada-por-agente", `aprobación ${id}: la declaración de ${agente.id} no corresponde a ${row.agente} (fail closed)`);
+      if (agente.acceso === "deny") return cerrar("denegada-por-agente", `aprobación ${id}: el agente ${agente.id} declara ${agente.tool}=deny`);
+    }
   }
   db.prepare("UPDATE aprobaciones SET estado=?, decided_by=?, decided_at=? WHERE id=?").run(aprueba ? "aprobada" : "rechazada", quien ?? "sistema", new Date().toISOString(), id);
   db.close();
   const cota = row.agente ? `, agente ${row.agente}` : "";
-  return { ok: aprueba, msg: `${id} ${aprueba ? "aprobada" : "rechazada"} (${row.tool}, riesgo ${row.riesgo}${cota})` };
+  return { ok: aprueba, msg: `${id} ${aprueba ? "aprobada" : "rechazada"} (${row.tool}, riesgo ${row.riesgo}${cota})`, estado: aprueba ? "aprobada" : "rechazada", aplicada: true };
 }
 
 export function check(

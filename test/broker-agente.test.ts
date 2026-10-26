@@ -102,6 +102,37 @@ test("deny del agente bloquea una aprobación ya pedida", () => {
   });
 });
 
+test("rechazar no revalida la declaración: queda rechazada, no denegada-por-agente", () => {
+  conProyecto((root) => {
+    politicas(root, { editar: true }, { editar: true });
+    const r = check(root, "editar", undefined, declaracionDeHerramienta(root, "implementador", "editar"));
+    assert.equal(r.decision, "ask");
+    assert.ok(r.id);
+    // Entre la solicitud y el rechazo el agente pasa a deny: el rechazo sigue valiendo.
+    declarar(root, "implementador", "editar", "deny");
+    const no = decide(root, r.id!, false, "test", 30, declaracionDeAprobacion(root, r.id!));
+    assert.equal(no.ok, false, "rechazar nunca es una aprobación");
+    assert.equal(no.estado, "rechazada");
+    assert.equal(no.aplicada, true);
+    assert.match(no.msg, /rechazada/);
+    // Y no se puede reabrir: la fila ya está decidida.
+    const otra = decide(root, r.id!, true, "test", 30, declaracionDeAprobacion(root, r.id!));
+    assert.equal(otra.estado, "rechazada");
+    assert.equal(otra.aplicada, false);
+  });
+});
+
+test("rechazar no revalida la política: queda rechazada aunque la hayan revocado", () => {
+  conProyecto((root) => {
+    politicas(root, { editar: true }, { editar: true });
+    const r = check(root, "editar", undefined, declaracionDeHerramienta(root, "implementador", "editar"));
+    assert.ok(r.id);
+    politicas(root, { editar: false }, { editar: true });
+    const no = decide(root, r.id!, false, "test", 30, declaracionDeAprobacion(root, r.id!));
+    assert.equal(no.estado, "rechazada");
+  });
+});
+
 test("sin declaración resoluble la aprobación se cierra, no se aprueba", () => {
   conProyecto((root) => {
     politicas(root, { editar: true }, { editar: true });
