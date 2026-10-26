@@ -44,7 +44,7 @@ export function skill(root: string, id?: string, s?: string): string {
 // Define detalles de un AgentDefinition (F8): instrucciones, herramientas, presupuesto.
 // Las skills siguen siendo instrucciones reutilizables, nunca autorización (decide el broker).
 export function definirAgente(root: string, id?: string, campo?: string, valor?: string): string {
-  if (!id || !campo) return "uso: axiom agents define <id> <instrucciones|herramienta|noherramienta|presupuesto|nopresupuesto> [valor]";
+  if (!id || !campo) return "uso: axiom agents define <id> <instrucciones|herramienta|noherramienta|presupuesto|nopresupuesto|modelo> [valor]";
   const r = loadAgents(root);
   if (!r.ok) return r.error;
   const i = r.config.agentes.findIndex((a) => a.id === id);
@@ -72,8 +72,12 @@ export function definirAgente(root: string, id?: string, campo?: string, valor?:
     a.presupuesto = { tokens: t, calls: c };
   } else if (campo === "nopresupuesto") {
     delete (a as { presupuesto?: unknown }).presupuesto;
+  } else if (campo === "modelo") {
+    // Modelo propio del agente: se usa en el spawn; "hereda-proveedor" vuelve al global.
+    if (!v || v.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9 ._:@/-]{0,127}$/.test(v)) return "uso: axiom agents define <id> modelo <id-del-modelo|hereda-proveedor>";
+    a.modelo = v;
   } else {
-    return `campo inválido: ${campo} (instrucciones|herramienta|noherramienta|presupuesto|nopresupuesto)`;
+    return `campo inválido: ${campo} (instrucciones|herramienta|noherramienta|presupuesto|nopresupuesto|modelo)`;
   }
   const chk = AgentsConfig.safeParse(r.config);
   if (!chk.success) return `agents.config.json inválido: ${chk.error.issues.map((x) => x.message).join("; ")}`;

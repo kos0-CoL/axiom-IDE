@@ -98,11 +98,20 @@ function extraerVeredicto(texto: string): "pass" | "fail" | null {
   return m ? (m[1] as "pass" | "fail") : null;
 }
 
+// Modelo efectivo del agente: undefined = heredar el modelo global del proveedor.
+// Es la única regla de precedencia, exportada para que los tests la fijen.
+export function modeloDeAgente(agente: Pick<AgenteEjecutable, "modelo">): string | undefined {
+  const propio = typeof agente.modelo === "string" ? agente.modelo.trim() : "";
+  return propio && propio !== "hereda-proveedor" ? propio : undefined;
+}
+
 // Ejecuta un agente (spawn con su configuración)
 async function ejecutarAgente(root: string, agente: AgenteEjecutable, prompt: string): Promise<SpawnResult> {
-  // TODO: usar modelo específico del agente si difiere del proveedor global
-  // Por ahora usa el proveedor global configurado
-  return spawn(root, prompt);
+  // Modelo por agente: si el agente declara uno propio se pasa como override; con
+  // "hereda-proveedor" el adaptador usa el modelo global. Un modelo inválido NO cae
+  // al global en silencio: el error del proveedor se propaga (fail closed).
+  const propio = modeloDeAgente(agente);
+  return spawn(root, prompt, propio ? { model: propio } : {});
 }
 
 // Encuentra el siguiente agente al que delegar según el grafo
@@ -165,7 +174,7 @@ export async function ejecutarTareaGrafo(
   // Guardar artefacto de trabajo
   const relPath = `specs/active/${specId}/trabajo-${taskId}.md`;
   mkdirSync(activeDir(root, specId), { recursive: true });
-  writeFileSync(join(activeDir(root, specId), `trabajo-${taskId}.md`), `# Trabajo ${taskId}\n\n**agente:** ${delegado.id}\n**juez:** pendiente\n**fecha:** ${new Date().toISOString()}\n\n${trabajoTexto}\n`);
+  writeFileSync(join(activeDir(root, specId), `trabajo-${taskId}.md`), `# Trabajo ${taskId}\n\n**agente:** ${delegado.id}\n**modelo:** ${trabajoResult.model}\n**juez:** pendiente\n**fecha:** ${new Date().toISOString()}\n\n${trabajoTexto}\n`);
 
   // Paso 3: Juez (puede ser nodo-review o el mismo agente)
   let juezId = encontrarDelegado(grafo, delegadoId, "review");

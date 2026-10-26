@@ -144,7 +144,7 @@ export function ponerMaxChars(root: string, n?: string): string {
 export async function spawn(
   root: string,
   task: string,
-  override: { timeoutMs?: number; maxChars?: number; key?: string; onDelta?: (texto: string) => void } = {},
+  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; onDelta?: (texto: string) => void } = {},
 ): Promise<SpawnResult> {
   const r = loadConfig(root);
   if (!r.ok) return { ok: false, error: `config inválida (fail closed): ${r.error}`, ms: 0, proveedor: "?", model: "?" };
@@ -153,13 +153,17 @@ export async function spawn(
     timeoutMs: override.timeoutMs ?? c.timeoutMs,
     maxChars: override.maxChars ?? c.maxChars,
   };
+  // Modelo efectivo: el del agente si lo trae, el global si no. Sin fallback
+  // silencioso al global cuando el modelo pedido falla: el proveedor responde y
+  // su error se propaga tal cual (se ve qué agente y qué modelo lo causaron).
+  const modelo = typeof override.model === "string" && override.model.trim() ? override.model.trim() : c.model;
   if (c.proveedor === "off") {
-    return { ok: false, error: "apagado (fail closed): elige un proveedor en Configuración", ms: 0, proveedor: "off", model: c.model };
+    return { ok: false, error: "apagado (fail closed): elige un proveedor en Configuración", ms: 0, proveedor: "off", model: modelo };
   }
-  if (c.proveedor === "ollama") return spawnOllama(baseUrlDe(c), c.model, task, budget);
+  if (c.proveedor === "ollama") return spawnOllama(baseUrlDe(c), modelo, task, budget);
   if (c.proveedor === "anthropic") {
     const key = override.key ?? keyPara("anthropic", root);
-    if (!key) return { ok: false, error: "sin key (fail closed): guarda ANTHROPIC_API_KEY en Configuración", ms: 0, proveedor: "anthropic", model: c.model };
+    if (!key) return { ok: false, error: "sin key (fail closed): guarda ANTHROPIC_API_KEY en Configuración", ms: 0, proveedor: "anthropic", model: modelo };
     const t0 = Date.now();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), budget.timeoutMs);
@@ -167,35 +171,35 @@ export async function spawn(
       const r = await fetch(`${baseUrlDe(c).replace(/\/$/, "")}/v1/messages`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: c.model, max_tokens: Math.min(c.maxChars, 4096), messages: [{ role: "user", content: task }] }),
+        body: JSON.stringify({ model: modelo, max_tokens: Math.min(c.maxChars, 4096), messages: [{ role: "user", content: task }] }),
         signal: ctrl.signal,
       });
       const j = (await r.json()) as { content?: { text?: unknown }[]; error?: { message?: unknown }; usage?: { input_tokens?: unknown; output_tokens?: unknown } };
       const text = j.content?.map((b) => (typeof b.text === "string" ? b.text : "")).join("") ?? "";
       if (!r.ok || !text) {
         const d = typeof j.error?.message === "string" ? j.error.message : `HTTP ${r.status}`;
-        return { ok: false, error: `anthropic: ${d}`.slice(0, 300), ms: Date.now() - t0, proveedor: "anthropic", model: c.model };
+        return { ok: false, error: `anthropic: ${d}`.slice(0, 300), ms: Date.now() - t0, proveedor: "anthropic", model: modelo };
       }
       const truncada = text.length > budget.maxChars;
       const usoA: UsoSpawn = typeof (j.usage?.input_tokens) === "number" && typeof (j.usage?.output_tokens) === "number"
         ? { prompt: j.usage.input_tokens as number, respuesta: j.usage.output_tokens as number, total: (j.usage.input_tokens as number) + (j.usage.output_tokens as number), fuente: "medido" }
         : usoEstimado(task, text);
-      return { ok: true, text: truncada ? text.slice(0, budget.maxChars) : text, ms: Date.now() - t0, proveedor: "anthropic", model: c.model, truncada, uso: usoA };
+      return { ok: true, text: truncada ? text.slice(0, budget.maxChars) : text, ms: Date.now() - t0, proveedor: "anthropic", model: modelo, truncada, uso: usoA };
     } catch (e) {
       const msg = e instanceof Error ? (e.name === "AbortError" ? `timeout ${budget.timeoutMs}ms` : e.message) : String(e);
-      return { ok: false, error: `anthropic: ${msg}`.slice(0, 300), ms: Date.now() - t0, proveedor: "anthropic", model: c.model };
+      return { ok: false, error: `anthropic: ${msg}`.slice(0, 300), ms: Date.now() - t0, proveedor: "anthropic", model: modelo };
     } finally {
       clearTimeout(timer);
     }
   }
   if (c.proveedor === "google") {
     const key = override.key ?? keyPara("google", root);
-    if (!key) return { ok: false, error: "sin key (fail closed): guarda GOOGLE_API_KEY en Configuración", ms: 0, proveedor: "google", model: c.model };
+    if (!key) return { ok: false, error: "sin key (fail closed): guarda GOOGLE_API_KEY en Configuración", ms: 0, proveedor: "google", model: modelo };
     const t0 = Date.now();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), budget.timeoutMs);
     try {
-      const r = await fetch(`${baseUrlDe(c).replace(/\/$/, "")}/v1beta/models/${encodeURIComponent(c.model)}:generateContent?key=${encodeURIComponent(key)}`, {
+      const r = await fetch(`${baseUrlDe(c).replace(/\/$/, "")}/v1beta/models/${encodeURIComponent(modelo)}:generateContent?key=${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: task }] }] }),
@@ -205,17 +209,17 @@ export async function spawn(
       const text = j.candidates?.map((cd) => (cd.content?.parts ?? []).map((p) => (typeof p.text === "string" ? p.text : "")).join("")).join("") ?? "";
       if (!r.ok || !text) {
         const d = typeof j.error?.message === "string" ? j.error.message : `HTTP ${r.status}`;
-        return { ok: false, error: `google: ${d}`.slice(0, 300), ms: Date.now() - t0, proveedor: "google", model: c.model };
+        return { ok: false, error: `google: ${d}`.slice(0, 300), ms: Date.now() - t0, proveedor: "google", model: modelo };
       }
       const truncada = text.length > budget.maxChars;
       const ug = j.usageMetadata;
       const usoG: UsoSpawn = typeof ug?.promptTokenCount === "number" && typeof ug?.candidatesTokenCount === "number"
         ? { prompt: ug.promptTokenCount, respuesta: ug.candidatesTokenCount, total: typeof ug.totalTokenCount === "number" ? ug.totalTokenCount : (ug.promptTokenCount as number) + (ug.candidatesTokenCount as number), fuente: "medido" }
         : usoEstimado(task, text);
-      return { ok: true, text: truncada ? text.slice(0, budget.maxChars) : text, ms: Date.now() - t0, proveedor: "google", model: c.model, truncada, uso: usoG };
+      return { ok: true, text: truncada ? text.slice(0, budget.maxChars) : text, ms: Date.now() - t0, proveedor: "google", model: modelo, truncada, uso: usoG };
     } catch (e) {
       const msg = e instanceof Error ? (e.name === "AbortError" ? `timeout ${budget.timeoutMs}ms` : e.message) : String(e);
-      return { ok: false, error: `google: ${msg}`.slice(0, 300), ms: Date.now() - t0, proveedor: "google", model: c.model };
+      return { ok: false, error: `google: ${msg}`.slice(0, 300), ms: Date.now() - t0, proveedor: "google", model: modelo };
     } finally {
       clearTimeout(timer);
     }
@@ -223,14 +227,14 @@ export async function spawn(
   const keyName = c.proveedor === "litellm" ? "AXIOM_LITELLM_KEY" : c.proveedor === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY";
   const key = override.key ?? keyPara(c.proveedor, root);
   if (!key) {
-    return { ok: false, error: `sin key (fail closed): guarda ${keyName} en Configuración`, ms: 0, proveedor: c.proveedor, model: c.model };
+    return { ok: false, error: `sin key (fail closed): guarda ${keyName} en Configuración`, ms: 0, proveedor: c.proveedor, model: modelo };
   }
   if (c.proveedor === "openrouter" && !formatoOpenRouter(key)) {
-    return { ok: false, error: errorKeyOpenRouter(key), ms: 0, proveedor: c.proveedor, model: c.model };
+    return { ok: false, error: errorKeyOpenRouter(key), ms: 0, proveedor: c.proveedor, model: modelo };
   }
-  if (c.proveedor === "litellm") return spawnLiteLLM(baseUrlDe(c), c.model, task, key, budget);
+  if (c.proveedor === "litellm") return spawnLiteLLM(baseUrlDe(c), modelo, task, key, budget);
   const extra: Record<string, string> = c.proveedor === "openrouter" ? { "HTTP-Referer": "http://127.0.0.1/", "X-Title": "Axiom" } : {};
-  const s = await spawnOpenAICompat(c.proveedor, baseUrlDe(c), c.model, task, key, budget, extra, override.onDelta);
+  const s = await spawnOpenAICompat(c.proveedor, baseUrlDe(c), modelo, task, key, budget, extra, override.onDelta);
   // Key bien formada pero rechazada (revocada/de otra cuenta): el 401 de
   // OpenRouter llega sin pista; se lo explicamos en el propio error.
   if (!s.ok && s.error && /Missing Authentication header/i.test(s.error)) s.error += " — OpenRouter no reconoce esta key: crea una sk-or-v1-… en openrouter.ai/keys y guárdala en Configuración";
