@@ -1,6 +1,9 @@
 // evals — suite de evaluación del harness con línea base ejecutable (ADR-0003).
 // Mide el harness, no un modelo: construcción, contratos de módulos, fail-closed
-// del verify y el endpoint web. Cada caso produce un veredicto y una latencia.
+// del verify, el endpoint web y — con proveedor LLM configurado — la trayectoria
+// de un run (llamadas, tokens y latencia por run). Sin proveedor el grupo
+// trayectoria se omite justificado y no cuenta como fallo. Cada caso produce un
+// veredicto y una latencia.
 //
 //   npm run evals                      → ejecuta y compara contra evals/baseline.json
 //   npm run evals -- --write-baseline  → (re)escribe la línea base (solo si todo pasa)
@@ -411,6 +414,85 @@ const casos = [
           ? "check deja traza (allow+deny) y status --trace la consulta"
           : `code=${allow.code}/${deny.code} filas=${filas.length} global=${global.out.slice(0, 120)} tarea=${tarea.out.slice(0, 120)}`,
       };
+    },
+  },
+  {
+    // ADR-0003 (grupo añadido): trayectoria REAL de un run con `--agente` —
+    // llamadas al LLM, tokens y latencia por run. Requiere proveedor configurado
+    // en adapters.config.json del repo; sin él el caso se omite justificado.
+    id: "trayectoria-run",
+    grupo: "trayectoria",
+    async ejecutar(ctx) {
+      const cfgRepo = join(raiz, "adapters.config.json");
+      let cfg;
+      try {
+        cfg = JSON.parse(readFileSync(cfgRepo, "utf8"));
+      } catch (e) {
+        const motivo = e?.code === "ENOENT" ? "ausente" : e.message;
+        return { omitido: `sin proveedor LLM configurado (adapters.config.json ${motivo})` };
+      }
+      if (!cfg.proveedor || cfg.proveedor === "off") {
+        return { omitido: "sin proveedor LLM configurado (adapters.config.json con proveedor off)" };
+      }
+      // El proyecto temporal hereda la config del repo; la key llega por env.
+      writeFileSync(join(ctx.root, "adapters.config.json"), JSON.stringify(cfg, null, 2) + "\n");
+      // Habilitación del operador para correr con agente: el harness arranca
+      // fail-closed (sin permiso global+proyecto el broker bloquea `delega` y
+      // `editar`, los tres usos del paso trabajo+juez) y aquí se replica esa
+      // habilitación en el proyecto temporal, preservando lo que init ya sembró
+      // (terminal: false, techo, presupuesto…).
+      for (const nombre of ["policies.global.json", "project.json"]) {
+        const p = join(ctx.root, nombre);
+        let actual = {};
+        try {
+          actual = JSON.parse(readFileSync(p, "utf8"));
+        } catch { /* init aún no lo escribió */ }
+        actual.tools = { ...(actual.tools ?? {}), delega: true, editar: true };
+        writeFileSync(p, JSON.stringify(actual, null, 2) + "\n");
+      }
+      // El grafo sembrado declara `editar=ask` (aprobación humana por uso). Para
+      // medir la trayectoria sin interacción, el operador lo eleva a allow con el
+      // propio comando de agentes (el loader cae al seed si no hay archivo y
+      // `agents define` crea agents.config.json al guardar).
+      const agentsCfg = await import(pathToFileURL(join(raiz, "dist", "modules", "agents", "config.js")).href);
+      const grafo = agentsCfg.loadAgents(ctx.root);
+      if (!grafo.ok) return { ok: false, detalle: `agents.config: ${grafo.error}` };
+      for (const a of grafo.config.agentes) {
+        if ((a.herramientas ?? []).some((h) => h.tool === "editar")) {
+          cli(ctx.root, ["agents", "define", a.id, "herramienta", "editar=allow"]);
+        }
+      }
+      // Spec propio con tareas pendientes: el run trabaja y juzga de verdad
+      // (la trayectoria mide el run completo, no una estimación seca).
+      for (const paso of [
+        ["spec", "trayect", "Trayectoria"],
+        ["plan", "trayect"],
+        ["tasks", "trayect"],
+      ]) {
+        const s = cli(ctx.root, paso);
+        if (s.code !== 0) return { ok: false, detalle: `setup (${paso[0]}) falló: ${s.out.slice(0, 200)}` };
+      }
+      const consumo = () =>
+        fila(ctx.root, "SELECT COALESCE(tokens,0) t, COALESCE(calls,0) c FROM consumo WHERE unit='global'") ?? { t: 0, c: 0 };
+      const antes = consumo();
+      const t0 = Date.now();
+      // Timeout propio: un run con proveedor remoto puede tardar más que el
+      // default de 120 s de los demás casos (varios spawns trabajo+juez).
+      const r = nodo([process.execPath, CLI, "--root", ctx.root, "run", "trayect", "--agente", "--rondas", "1"], {
+        timeout: 600000,
+      });
+      const latencia = Date.now() - t0;
+      const d = consumo();
+      const llamadas = d.c - antes.c;
+      const tokens = d.t - antes.t;
+      const fuente = fila(ctx.root, "SELECT fuente FROM uso_log ORDER BY id DESC LIMIT 1")?.fuente ?? "";
+      const detalle =
+        `llamadas=${llamadas} tokens=${tokens}${fuente ? `(${fuente})` : ""} latencia=${latencia} ms · run exit=${r.code}`;
+      // La run puede terminar OK (0) o PARCIAL (1, quedan tareas sin evidencia
+      // del juez); lo que no puede es no dejar trayectoria: sin llamadas no hay
+      // métrica que comparar contra la línea base.
+      const ok = r.code >= 0 && r.code <= 1 && llamadas >= 1 && tokens > 0 && latencia > 0;
+      return { ok, detalle: ok ? detalle : `${detalle} — ${r.out.slice(0, 220)}` };
     },
   },
 ];

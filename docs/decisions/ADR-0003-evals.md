@@ -14,7 +14,7 @@ no había forma de saber, al tocar el harness, si algo se rompió más allá de 
 ## Decisión
 
 Suite ejecutable `scripts/evals.mjs` (`npm run evals`) que evalúa **el harness, no
-un modelo**, en 4 grupos (16 casos):
+un modelo**, en 5 grupos (17 casos):
 
 1. **estático** — build (tsc), boundaries, seeds, webjs (sintaxis del `<script>` de
    la página + marcadores), superficie de módulos, openapi, tokens.
@@ -27,6 +27,11 @@ un modelo**, en 4 grupos (16 casos):
    Se ejecuta en un proyecto temporal real vía CLI.
 4. **e2e** — servidor `axiom serve` + `POST /api/verify` (200/400) contra el puerto libre, y
    `trazas-toolcall` (check deja traza allow+deny y `status --trace` la consulta).
+5. **trayectoria** (añadido) — `run --agente` contra el proveedor configurado en
+   `adapters.config.json` del repo: llamadas, tokens (con su fuente, medido o
+   estimado) y latencia **por run**. Sin proveedor el caso se omite justificado y
+   no cuenta como fallo; con proveedor entra en la línea base en la siguiente
+   escritura (`--write-baseline`).
 
 Línea base: `evals/baseline.json` (versionable), escrita con
 `npm run evals -- --write-baseline` **solo si los 16 casos pasan** (una línea base
@@ -44,7 +49,7 @@ Reglas de comparación:
 - El flujo "evalúa antes y después de tocar el harness" es operativo en un comando
   (~8 s); el informe distingue regresiones, mejoras y avisos de latencia.
 - `evals/baseline.json` se commitea: la comparación viaja con el repo.
-- Siguen **fuera, justificados**: evals de trayectoria con LLM (requieren proveedor
-  configurado y runs repetidos para línea base; hoy cero en el repo). Cuando exista,
-  añadir un grupo `trayectoria` con métricas de llamadas/tokens/latencia por run.
+- El grupo `trayectoria` pendiente en la versión inicial de este ADR ya existe
+  (ver Decisión, punto5): corre solo con proveedor LLM configurado y mide
+  llamadas/tokens/latencia por run; sin proveedor se omite sin penalizar el run.
 - Un caso nuevo se declara aquí (o en su PR) junto a su justificación.
