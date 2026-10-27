@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -17,6 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id
 CREATE TABLE IF NOT EXISTS plan_propuestas(id TEXT PRIMARY KEY, session_id TEXT, texto TEXT, estado TEXT, created_at TEXT, decided_at TEXT);
 CREATE TABLE IF NOT EXISTS build_proposals(id TEXT PRIMARY KEY, session_id TEXT NOT NULL, changes_json TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plan_artifacts(proposal_id TEXT PRIMARY KEY, spec_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS trace_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, origen TEXT, tool TEXT, agente TEXT DEFAULT '', decision TEXT, riesgo TEXT DEFAULT '', motivo TEXT DEFAULT '', approval_id TEXT DEFAULT '', entrada TEXT DEFAULT '', salida TEXT DEFAULT '', sha_io TEXT DEFAULT '', contexto TEXT DEFAULT '', ok INTEGER DEFAULT 1, ms INTEGER DEFAULT 0);
 `;
 
 export function openDb(projectRoot: string): DatabaseSync {
@@ -88,6 +90,81 @@ export function listBloqueos(projectRoot: string, limit = 20): { id: string; tas
   const rows = db.prepare("SELECT id, task_id, causa FROM bloqueos ORDER BY id DESC LIMIT ?").all(limit) as { id: string; task_id: string; causa: string }[];
   db.close();
   return rows;
+}
+
+// --- Traza de tool calls (AXM-066) ---
+// Cada llamada a herramienta deja una fila: qué tool, quién la pidió, qué
+// decidió el broker y un resumen ACOTADO del IO junto al sha256 del IO
+// completo (trazable byte a byte sin guardar basura). Best-effort por diseño:
+// una traza que no se escribe jamás rompe la llamada que la produjo.
+
+export interface TrazaTool {
+  origen: string; // cli | web | run | telegram | handoff
+  tool: string;
+  agente?: string;
+  decision: string;
+  riesgo?: string;
+  motivo?: string;
+  approvalId?: string;
+  entrada?: unknown;
+  salida?: unknown;
+  contexto?: string; // p. ej. "run <spec>/<tarea>" para vincularla a una tarea
+  ok?: boolean;
+  ms?: number;
+}
+
+export interface TrazaLeida {
+  id: number; ts: string; origen: string; tool: string; agente: string;
+  decision: string; riesgo: string; motivo: string; approval_id: string;
+  entrada: string; salida: string; sha_io: string; contexto: string;
+  ok: number; ms: number;
+}
+
+const LIMITE_IO = 500; // caracteres por resumen de IO
+const LIMITE_TRAZAS = 500; // retención: como uso_log, se conservan las más recientes
+
+function acotar(txt: string): string {
+  return txt.length > LIMITE_IO ? txt.slice(0, LIMITE_IO) + `…(+${txt.length - LIMITE_IO} B)` : txt;
+}
+
+function textoIO(v: unknown): string {
+  if (v === undefined) return "";
+  if (typeof v === "string") return v;
+  try { return JSON.stringify(v) ?? ""; } catch { return String(v); }
+}
+
+export function recordTraza(projectRoot: string, t: TrazaTool): void {
+  try {
+    const entrada = textoIO(t.entrada);
+    const salida = textoIO(t.salida);
+    const sha = createHash("sha256").update(`${entrada}\n${salida}`).digest("hex");
+    const db = openDb(projectRoot);
+    db.prepare(
+      "INSERT INTO trace_log(ts,origen,tool,agente,decision,riesgo,motivo,approval_id,entrada,salida,sha_io,contexto,ok,ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    ).run(
+      new Date().toISOString(), t.origen, t.tool, t.agente ?? "", t.decision,
+      t.riesgo ?? "", (t.motivo ?? "").slice(0, 300), t.approvalId ?? "",
+      acotar(entrada), acotar(salida), sha, t.contexto ?? "",
+      t.ok === false ? 0 : 1, Math.max(0, Math.round(t.ms ?? 0)),
+    );
+    db.prepare("DELETE FROM trace_log WHERE id NOT IN (SELECT id FROM trace_log ORDER BY id DESC LIMIT ?)").run(LIMITE_TRAZAS);
+    db.close();
+  } catch { /* la traza nunca rompe la llamada */ }
+}
+
+// Últimas trazas, opcionalmente las de una tarea (contexto LIKE, p. ej.
+// "run demo/T1"). Devuelve [] si la base no existe o no se puede leer.
+export function listTrazas(projectRoot: string, limit = 20, contexto?: string): TrazaLeida[] {
+  try {
+    const db = openDb(projectRoot);
+    const rows = (contexto
+      ? db.prepare("SELECT * FROM trace_log WHERE contexto LIKE ? ORDER BY id DESC LIMIT ?").all(`%${contexto}%`, limit)
+      : db.prepare("SELECT * FROM trace_log ORDER BY id DESC LIMIT ?").all(limit)) as unknown as TrazaLeida[];
+    db.close();
+    return rows;
+  } catch {
+    return [];
+  }
 }
 
 export { dirname };

@@ -50,7 +50,7 @@ export function handoff(root: string, de?: string, a?: string, tarea?: string): 
   if (!arista) return `sin arista de delegación ${de} → ${a} (usa \`agents link ${de} ${a} delega\`)`;
   // Quien delega es el agente `de`: la herramienta se autoriza con SU
   // declaración, no solo con la política del proyecto.
-  const c = check(root, "delega", DELEGA_CONTRACT, declaracionDeHerramienta(root, de, "delega"));
+  const c = check(root, "delega", DELEGA_CONTRACT, declaracionDeHerramienta(root, de, "delega"), { origen: "handoff", entrada: { de, a, tarea: t }, contexto: t });
   tabla(root);
   const db = openDb(root);
   if (c.decision === "deny") {

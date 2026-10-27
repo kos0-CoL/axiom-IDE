@@ -3,7 +3,7 @@
 import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { addConsumo, getConsumo, listBloqueos, listUsos, openDb, recordBloqueo, recordUso } from "./store.js";
+import { addConsumo, getConsumo, listBloqueos, listTrazas, listUsos, openDb, recordBloqueo, recordUso } from "./store.js";
 import { TaskContract } from "./contracts.js";
 import { SPEC_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE, VERIFICATION_TEMPLATE, OVERRIDES_README } from "./preset.js";
 import { check, decide } from "./broker.js";
@@ -305,7 +305,15 @@ export async function cmdRun(root: string, id?: string, maxRondas = 3, tokens = 
   if (r.code !== 0) process.exit(r.code);
 }
 
-export function cmdStatus(root: string, traceId?: string): void {
+// Formato de una traza de tool call para la consola: qué, quién, qué decidió,
+// cuánto tardó y el IO resumido (AXM-066). Exportado para los tests.
+export function lineaTraza(z: { ts: string; origen: string; tool: string; agente: string; decision: string; approval_id: string; entrada: string; salida: string; sha_io: string; contexto: string; ms: number }): string {
+  const io = [z.entrada, z.salida].filter(Boolean).join(" → ") || "sin IO";
+  return `${z.ts} ${z.origen} ${z.tool}${z.agente ? `(${z.agente})` : ""}: ${z.decision}${z.approval_id ? ` id=${z.approval_id}` : ""} ${z.ms}ms io=${io} sha=${z.sha_io.slice(0, 8)}${z.contexto ? ` [${z.contexto}]` : ""}`;
+}
+
+// conTrace: `status --trace` sin id añade las últimas trazas globales (AXM-066).
+export function cmdStatus(root: string, traceId?: string, conTrace = false): void {
   if (traceId) asegurarColumnaArchivos(root);
   const db = openDb(root);
   if (traceId) {
@@ -320,7 +328,12 @@ export function cmdStatus(root: string, traceId?: string): void {
     const juezFallo = existsSync(errFile) || bloq.some((b) => b.causa.startsWith("juez-fallido:"));
     const usosTxt = (() => { try { return listUsos(root, 3).map((u) => `+${u.total}tok(${u.fuente})`).join(" ") || "sin spawns"; } catch { return "sin spawns"; } })();
     const arch = typeof ev?.archivos === "string" && ev.archivos ? ev.archivos.split("\n").length : 0;
-    console.log(`trace ${t.id}: spec ${t.spec_id}:${t.spec_ver} estado=${t.estado} evidencia=${ev ? ev.verdict + " " + ev.sha256.slice(0, 8) : "PENDIENTE"} archivos=${arch} verification.md=${existsSync(verFile) ? "sí" : "falta"} juez-fallido=${juezFallo ? "sí (no es fail del trabajo)" : "no"} bloqueos=${bloq.length ? bloq.map((b) => b.causa).join("; ") : "ninguno"} consumo=tokens:${cons.tokens} calls:${cons.calls} usos=${usosTxt}`);
+    // Tool calls de ESTA tarea (AXM-066): las trazas cuyo contexto la nombra
+    // (p. ej. "run <spec>/<tarea>"). Sin trazas se dice, no se calla.
+    const trazas = listTrazas(root, 50, traceId);
+    console.log(`trace ${t.id}: spec ${t.spec_id}:${t.spec_ver} estado=${t.estado} evidencia=${ev ? ev.verdict + " " + ev.sha256.slice(0, 8) : "PENDIENTE"} archivos=${arch} verification.md=${existsSync(verFile) ? "sí" : "falta"} juez-fallido=${juezFallo ? "sí (no es fail del trabajo)" : "no"} bloqueos=${bloq.length ? bloq.map((b) => b.causa).join("; ") : "ninguno"} consumo=tokens:${cons.tokens} calls:${cons.calls} usos=${usosTxt} trazas=${trazas.length}`);
+    for (const z of trazas) console.log(`  traza ${lineaTraza(z)}`);
+    if (trazas.length === 0) console.log("  trazas: ninguna para esta tarea");
     return;
   }
   const counts: any[] = db.prepare("SELECT estado, COUNT(*) c FROM tasks GROUP BY estado").all();
@@ -328,6 +341,11 @@ export function cmdStatus(root: string, traceId?: string): void {
   console.log(`proyecto: ${root}`);
   console.log(`specs: ${(specs[0] as any)?.c ?? 0} tareas: ${counts.map((c: any) => `${c.estado}=${c.c}`).join(" ") || "0"}`);
   db.close();
+  if (conTrace) {
+    const trazas = listTrazas(root, 10);
+    console.log(`trazas: ${trazas.length ? `últimas ${trazas.length}` : "ninguna"}`);
+    for (const z of trazas) console.log(`  ${lineaTraza(z)}`);
+  }
 }
 
 export function cmdValidate(root: string): void {
@@ -405,7 +423,7 @@ export function cmdCheck(root: string, tool?: string, agente?: string): void {
   }
   // Con --agente la decisión se cruza con lo que ese agente declara.
   const declaracion = agente ? declaracionDeHerramienta(root, agente, tool) : undefined;
-  const r = check(root, tool, undefined, declaracion);
+  const r = check(root, tool, undefined, declaracion, { origen: "cli", entrada: { agente: agente ?? null } });
   const quien = agente ? ` (agente ${agente})` : "";
   console.log(`check ${tool}${quien}: ${r.decision} (riesgo=${r.riesgo}) — ${r.motivo}${r.id ? ` id=${r.id}` : ""}`);
   if (r.decision === "deny") process.exit(2);

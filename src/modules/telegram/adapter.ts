@@ -14,7 +14,7 @@ export function expiracion(root: string): number {
 }
 
 export function notifyApproval(root: string, tool: string): string {
-  const r = check(root, tool);
+  const r = check(root, tool, undefined, undefined, { origen: "telegram", entrada: { tool } });
   if (r.decision !== "ask" || !r.id) return `check ${tool}: ${r.decision} — ${r.motivo}`;
   return formatApproval({ id: r.id, tool, riesgo: r.riesgo, motivo: r.motivo, expiraMin: expiracion(root) });
 }

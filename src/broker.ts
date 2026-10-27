@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { openDb } from "./store.js";
+import { openDb, recordTraza } from "./store.js";
 import { effectiveAllow } from "./policy.js";
 import { ToolContract } from "./contracts.js";
 
@@ -75,7 +75,18 @@ export function consumirAprobacion(root: string, tool: string, agente: string): 
     if (!row?.id) return undefined;
     // CAS sobre el estado: si dos procesos compiten, solo uno la consume.
     const marca = db.prepare("UPDATE aprobaciones SET estado='usada', usada_at=? WHERE id=? AND estado='aprobada'").run(new Date().toISOString(), row.id);
-    return Number(marca.changes ?? 0) > 0 ? { id: row.id } : undefined;
+    const consumida = Number(marca.changes ?? 0) > 0;
+    // Traza del uso real (AXM-066): la aprobación consumida ES la tool call
+    // autorizada; sin esta fila, `status --trace` vería la solicitud pero no el uso.
+    if (consumida) {
+      recordTraza(root, {
+        origen: "run", tool, decision: "allow",
+        motivo: `aprobación ${row.id} consumida por ${tool}`,
+        approvalId: row.id, entrada: { tool }, salida: { consumida: true },
+        contexto: "", ok: true,
+      });
+    }
+    return consumida ? { id: row.id } : undefined;
   } catch {
     return undefined;
   } finally {
@@ -147,13 +158,25 @@ export function decide(
   return { ok: aprueba, msg: `${id} ${aprueba ? "aprobada" : "rechazada"} (${row.tool}, riesgo ${row.riesgo}${cota})`, estado: aprueba ? "aprobada" : "rechazada", aplicada: true };
 }
 
+// Contexto opcional de la llamada para la traza (AXM-066): quién origina la
+// tool call y con qué IO de entrada. Los llamadores existentes son compatibles
+// porque el parámetro es opcional.
+export interface LlamadaTrazable {
+  origen?: string; // cli | web | run | telegram | handoff
+  entrada?: unknown;
+  contexto?: string; // p. ej. "run <spec>/<tarea>"
+}
+
 export function check(
   root: string,
   toolName: string,
   tool?: ToolContract,
   agente?: DeclaracionAgente,
+  llamada?: LlamadaTrazable,
 ): Veredicto & { id?: string } {
+  const t0 = Date.now();
   const r = componer(effectiveAllow(root, toolName, tool), agente);
+  let id: string | undefined;
   if (r.decision === "ask") {
     // Una solicitud pendiente vigente para la misma (herramienta, agente) se
     // reutiliza: reintentar una corrida bloqueada no debe llenar Aprobaciones de
@@ -165,20 +188,40 @@ export function check(
       const previa = db
         .prepare("SELECT id FROM aprobaciones WHERE tool=? AND agente IS ? AND estado='pendiente' AND created_at>=? ORDER BY created_at ASC LIMIT 1")
         .get(toolName, agente?.id ?? null, desde) as { id?: string } | undefined;
-      if (previa?.id) { db.close(); return { ...r, id: previa.id }; }
-      const id = createHash("sha256").update(`${toolName}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 8);
-      // audita solicitud en SQLite (tabla aprobaciones best-effort)
-      db.prepare("INSERT INTO aprobaciones(id,tool,riesgo,estado,created_at,agente) VALUES(?,?,?,?,?,?)").run(
-        id,
-        toolName,
-        r.riesgo,
-        "pendiente",
-        new Date().toISOString(),
-        agente?.id ?? null,
-      );
-      db.close();
-      return { ...r, id };
+      if (previa?.id) {
+        db.close();
+        id = previa.id;
+      } else {
+        id = createHash("sha256").update(`${toolName}:${Date.now()}:${Math.random()}`).digest("hex").slice(0, 8);
+        // audita solicitud en SQLite (tabla aprobaciones best-effort)
+        db.prepare("INSERT INTO aprobaciones(id,tool,riesgo,estado,created_at,agente) VALUES(?,?,?,?,?,?)").run(
+          id,
+          toolName,
+          r.riesgo,
+          "pendiente",
+          new Date().toISOString(),
+          agente?.id ?? null,
+        );
+        db.close();
+      }
     } catch { /* best effort: se devuelve la decisión sin id */ }
   }
-  return r;
+  // Traza por tool call (AXM-066): el broker es el único punto de decisión, así
+  // que TODA llamada a herramienta pasa por aquí (CLI, web, run, telegram,
+  // handoff). Best-effort: la traza nunca cambia ni rompe la decisión.
+  recordTraza(root, {
+    origen: llamada?.origen ?? "cli",
+    tool: toolName,
+    agente: agente ? ("error" in agente ? `${agente.id}(error)` : agente.id) : "",
+    decision: r.decision,
+    riesgo: r.riesgo,
+    motivo: r.motivo,
+    approvalId: id ?? "",
+    entrada: llamada?.entrada ?? {},
+    salida: { decision: r.decision, id: id ?? null },
+    contexto: llamada?.contexto ?? "",
+    ok: r.decision === "allow",
+    ms: Date.now() - t0,
+  });
+  return id ? { ...r, id } : r;
 }

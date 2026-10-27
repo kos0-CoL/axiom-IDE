@@ -70,7 +70,7 @@ export function autorizarUso(root: string, agenteId: string, tool: string, contr
       return { decision: "allow", motivo: `aprobación ${aprobada.id} consumida por ${agenteId}:${d.tool}`, id: aprobada.id };
     }
   }
-  return check(root, tool, contrato, d);
+  return check(root, tool, contrato, d, { origen: "run", entrada: { agente: agenteId, tool } });
 }
 
 // Un uso no permitido detiene la corrida con el motivo del broker, no con un
