@@ -43,5 +43,5 @@ Traza **local-first en SQLite** (`trace_log`), sin dependencias nuevas:
 - Cubierto por `test/trazas.test.ts` (5 tests), `test/trazas-api.test.ts`
   (GET /api/trazas + vista del panel) y en `npm run evals` por los casos
   `trazas-toolcall` (CLI) y `api-trazas` (servidor real: endpoint + vista +
-  filtro y límites) — suite de 18 casos en 5 grupos; la línea base guarda 17,
-  el grupo trayectoria va omitido sin proveedor.
+  filtro y límites) — suite de 18 casos en 5 grupos, los 18 presentes en la
+  línea base actual; sin proveedor LLM el grupo trayectoria se omite justificado.

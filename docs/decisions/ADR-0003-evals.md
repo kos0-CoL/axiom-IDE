@@ -14,7 +14,7 @@ no había forma de saber, al tocar el harness, si algo se rompió más allá de 
 ## Decisión
 
 Suite ejecutable `scripts/evals.mjs` (`npm run evals`) que evalúa **el harness, no
-un modelo**, en 5 grupos (17 casos):
+un modelo**, en 5 grupos (18 casos):
 
 1. **estático** — build (tsc), boundaries, seeds, webjs (sintaxis del `<script>` de
    la página + marcadores), superficie de módulos, openapi, tokens.
@@ -25,8 +25,10 @@ un modelo**, en 5 grupos (17 casos):
    allowlist, módulo browser apagado, página de error del navegador y timeout
    de red (URL que cuelga ⇒ parte de timeout + ajuste pass→fail con evidencia).
    Se ejecuta en un proyecto temporal real vía CLI.
-4. **e2e** — servidor `axiom serve` + `POST /api/verify` (200/400) contra el puerto libre, y
-   `trazas-toolcall` (check deja traza allow+deny y `status --trace` la consulta).
+4. **e2e** — servidor `axiom serve` + `POST /api/verify` (200/400) contra el puerto libre,
+   `trazas-toolcall` (check deja traza allow+deny y `status --trace` la consulta) y
+   `api-trazas` (el servidor real sirve `GET /api/trazas` con `linea` de la CLI,
+   filtro por contexto positivo/negativo, `limite` saneado y la vista en el HTML).
 5. **trayectoria** (añadido) — `run --agente` contra el proveedor configurado en
    `adapters.config.json` del repo: llamadas, tokens (con su fuente, medido o
    estimado) y latencia **por run**. Sin proveedor el caso se omite justificado y
@@ -34,8 +36,9 @@ un modelo**, en 5 grupos (17 casos):
    escritura (`--write-baseline`).
 
 Línea base: `evals/baseline.json` (versionable), escrita con
-`npm run evals -- --write-baseline` **solo si los 16 casos pasan** (una línea base
-roja normalizaría el fallo).
+`npm run evals -- --write-baseline` **solo si todos los que corren pasan** (18 con
+proveedor LLM; sin él trayectoria se omite y son 17 — una línea base roja
+normalizaría el fallo).
 
 Reglas de comparación:
 - **Regresión** = caso ok en la línea base que falla ahora → run en rojo (exit 1).

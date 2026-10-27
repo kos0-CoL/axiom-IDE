@@ -417,6 +417,69 @@ const casos = [
     },
   },
   {
+    // ADR-0004: el panel consume el endpoint real, no la CLI. Servidor `axiom serve`
+    // levantado de verdad: GET /api/trazas devuelve las filas con `linea` de la CLI,
+    // filtra por contexto (positivo y negativo), sanea `limite` y la página anuncia
+    // la vista Trazas. Diferente de trazas-toolcall, que consulta la base directo.
+    id: "api-trazas",
+    grupo: "e2e",
+    async ejecutar(ctx) {
+      // Trazas reales por la CLI: allow + deny, y un handoff que lleva contexto
+      // de tarea (contexto = tarea) para poder aislarlo con el filtro.
+      cli(ctx.root, ["check", "status"]);
+      cli(ctx.root, ["check", "terminal"]);
+      cli(ctx.root, ["agents", "handoff", "orquestador", "implementador", "demo-T1", "filtro", "trazas"]);
+      const puerto = await puertoLibre();
+      const hijo = spawn(process.execPath, [CLI, "--root", ctx.root, "serve", String(puerto)], {
+        cwd: raiz,
+        stdio: "ignore",
+      });
+      try {
+        const base = `http://127.0.0.1:${puerto}`;
+        if (!(await esperarHttp(`${base}/`))) return { ok: false, detalle: "el servidor no levantó" };
+        const errores = [];
+        const html = await (await fetch(`${base}/`)).text();
+        for (const marca of ["api/trazas", "trazasload", "v-trz"]) {
+          if (!html.includes(marca)) errores.push(`HTML sin ${marca}`);
+        }
+        const r = await fetch(`${base}/api/trazas`);
+        if (r.status !== 200) errores.push(`GET /api/trazas → ${r.status}`);
+        const d = await r.json().catch(() => ({}));
+        const t = d.trazas ?? [];
+        if (d.ok !== true) errores.push(`ok=${d.ok}`);
+        const allow = t.find((z) => z.tool === "status" && z.decision === "allow");
+        const deny = t.find((z) => z.tool === "terminal" && z.decision === "deny");
+        if (!allow) errores.push("sin fila status/allow");
+        if (!deny) errores.push("sin fila terminal/deny");
+        // `linea` lo formatea lineaTraza (misma función que la CLI) y el sha es del IO completo.
+        if (allow && !String(allow.linea ?? "").includes("status")) errores.push("fila sin linea de la CLI");
+        if (allow && !/^[0-9a-f]{64}$/.test(allow.sha_io ?? "")) errores.push("sha_io no es sha256");
+        // Filtro por contexto: positivo (la del handoff) y negativo.
+        const pos = await (await fetch(`${base}/api/trazas?contexto=${encodeURIComponent("demo-T1")}`)).json();
+        const posT = pos.trazas ?? [];
+        if (posT.length < 1) errores.push("contexto demo-T1 no aísla ninguna fila");
+        if (posT.some((z) => !String(z.contexto ?? "").includes("demo-T1"))) errores.push("filtro dejó filas ajenas");
+        const neg = await (await fetch(`${base}/api/trazas?contexto=zzz-sin-coincidencias`)).json();
+        if ((neg.trazas ?? []).length !== 0) errores.push("filtro sin coincidencias devolvió filas");
+        // Saneo de límites: lo no numérico → 50, fuera de rango → tope 200 (nunca 500).
+        const l1 = await (await fetch(`${base}/api/trazas?limite=abc`)).json();
+        const l2 = await (await fetch(`${base}/api/trazas?limite=9999`)).json();
+        if (l1.limite !== 50) errores.push(`limite=abc → ${l1.limite} (esperado 50)`);
+        if (l2.limite !== 200) errores.push(`limite=9999 → ${l2.limite} (esperado 200)`);
+        return {
+          ok: errores.length === 0,
+          detalle: errores.length
+            ? errores.join(" · ")
+            : `GET 200 · ${t.length} filas con linea · contexto aísla · límites saneados · vista en el HTML`,
+        };
+      } finally {
+        hijo.kill("SIGTERM");
+        await new Promise((r) => setTimeout(r, 300));
+        if (!hijo.killed) hijo.kill("SIGKILL");
+      }
+    },
+  },
+  {
     // ADR-0003 (grupo añadido): trayectoria REAL de un run con `--agente` —
     // llamadas al LLM, tokens y latencia por run. Requiere proveedor configurado
     // en adapters.config.json del repo; sin él el caso se omite justificado.
@@ -434,8 +497,16 @@ const casos = [
       if (!cfg.proveedor || cfg.proveedor === "off") {
         return { omitido: "sin proveedor LLM configurado (adapters.config.json con proveedor off)" };
       }
-      // El proyecto temporal hereda la config del repo; la key llega por env.
+      // El proyecto temporal hereda la config del repo; la key llega por env
+      // si tiene formato válido, y si no — o si no hay env — por el archivo de
+      // secrets del operador (gitignored, 0600), igual que la config. Sin key
+      // en ninguna de las dos fuentes el run sigue fallando fail-closed.
       writeFileSync(join(ctx.root, "adapters.config.json"), JSON.stringify(cfg, null, 2) + "\n");
+      try {
+        const secs = readFileSync(join(raiz, ".axiom-secrets.json"), "utf8");
+        JSON.parse(secs); // solo se copia si es JSON legible
+        writeFileSync(join(ctx.root, ".axiom-secrets.json"), secs, { mode: 0o600 });
+      } catch { /* sin secrets en el repo: una env válida basta */ }
       // Habilitación del operador para correr con agente: el harness arranca
       // fail-closed (sin permiso global+proyecto el broker bloquea `delega` y
       // `editar`, los tres usos del paso trabajo+juez) y aquí se replica esa
