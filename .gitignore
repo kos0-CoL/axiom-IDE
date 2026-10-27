@@ -7,6 +7,8 @@ dist-test/
 telegram.bot-token
 .telegram-token
 .axiom-secrets.json
+# capturas del módulo browser (evidencia local, no se commitea)
+.axiom/browser/
 
 # artefactos de la recuperación: no forman parte del proyecto
 .recovery/worktrees/

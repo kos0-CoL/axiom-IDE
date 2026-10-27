@@ -52,6 +52,18 @@ else if (cmd === "grafos" && rest[0] === "ver") {
     for (const a of d.executed.aristas) console.log(`  ${a.de} ──${a.nota}──▶ ${a.a}`);
   }
 }
+else if (cmd === "browser") {
+  if (!moduloActivo(root, "browser")) { console.error("módulo browser deshabilitado (fail closed): habilítalo con `axiom module on browser`"); process.exit(2); }
+  const { estadoBrowser, capturar } = await import("./modules/browser/index.js");
+  const url = rest.filter((a) => a !== "--dom")[0];
+  if (!url) { console.log(estadoBrowser(root)); }
+  else if (!/^https?:\/\//.test(url)) { console.error("uso: axiom browser [<url> [--dom]]"); process.exit(2); }
+  else {
+    const r = capturar(root, url, rest.includes("--dom") ? "dom" : "png");
+    if (!r.ok) { console.error(r.error); process.exit(1); }
+    console.log(`captura OK [${r.motor}] ${r.bytes} B → ${r.ruta}${r.errorPagina ? ` · PÁGINA DE ERROR: ${r.errorPagina}` : ""}${r.timeoutMs ? ` · TIMEOUT DE RED: ${r.timeoutMs} ms (parte de timeout, la URL no quedó cargada)` : ""}`);
+  }
+}
 else if (cmd === "module" && rest[0] === "check") { const m = textoSuperficie(rest[1]); console.log(m); if (/FALLO/.test(m)) process.exit(2); }
 else if (cmd === "module" && rest[0] === "vista") { const m = setVista(root, rest[1], rest[2]); console.log(m); if (/uso: axiom|inválido|inválida|desconocido/.test(m)) process.exit(2); }
 else if (cmd === "module") { console.log(textoModulos(root)); }
@@ -59,7 +71,7 @@ else if (cmd === "init") cmdInit(root);
 else if (cmd === "spec") cmdSpec(root, rest[0], ...rest.slice(1));
 else if (cmd === "plan") cmdPlan(root, rest[0]);
 else if (cmd === "tasks") cmdTasks(root, rest[0]);
-else if (cmd === "verify") { const t = flagNum(rest, "--tokens", 100); const c = flagNum(t.resto, "--calls", 1); const d = flagStr(c.resto, "--detalle"); const a = flagStr(d.resto, "--archivos"); cmdVerify(root, a.resto[0], a.resto[1], t.valor, c.valor, d.valor, "humano", a.valor); }
+else if (cmd === "verify") { const t = flagNum(rest, "--tokens", 100); const c = flagNum(t.resto, "--calls", 1); const d = flagStr(c.resto, "--detalle"); const a = flagStr(d.resto, "--archivos"); const u = flagStr(a.resto, "--url"); cmdVerify(root, u.resto[0], u.resto[1], t.valor, c.valor, d.valor, "humano", a.valor, u.valor, u.resto.includes("--dom") ? "dom" : "png"); }
 else if (cmd === "run") { const r = flagNum(rest, "--rondas", 3); const t = flagNum(r.resto, "--tokens", 50); const c = flagNum(t.resto, "--calls", 1); const pos = c.resto.filter((x) => x !== "--dry-run" && x !== "--agente"); await cmdRun(root, pos[0], r.valor, t.valor, c.valor, c.resto.includes("--dry-run"), c.resto.includes("--agente")); }
 else if (cmd === "status" && rest[0] === "--trace") cmdStatus(root, rest[1]);
 else if (cmd === "status") cmdStatus(root);

@@ -16,12 +16,13 @@ import { renderOrquestacion, renderTrabajo, datosOrquestacion, datosTrabajo } fr
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { dirname, relative, sep } from "node:path";
 import { crear, evaluar, rollback, marcarEstable, listar, remove, existeComp, existeNombre, diff as diffComp, comparables, guardarComparativa, guardarBateria, verBateria, listarBaterias, borrarBateria, bateriaPorDefecto } from "./components.js";
 import { sandboxRun, imagenPermitida } from "./sandbox.js";
 import { startWeb, validateTokens, defaultWebSource } from "./web.js";
 import { spawn as adaptersSpawn, formatSpawn } from "./adapters.js";
 import { rondaAgenteGrafo, declaracionDeHerramienta, declaracionDeAprobacion } from "./modules/agents/index.js";
+import { capturar } from "./modules/browser/index.js";
 
 export function activeDir(root: string, id: string): string {
   return join(root, "specs", "active", id);
@@ -105,7 +106,7 @@ export function flagStr(args: string[], name: string): { valor: string | undefin
 export interface VerifyResult { code: number; msg: string }
 
 // Núcleo de verify sin process.exit (run --agente y la web lo reutilizan).
-export function verificar(root: string, taskId: string | undefined, verdictArg: string | undefined, tokens = 100, calls = 1, detalle?: string, juez = "humano", archivosCSV?: string): VerifyResult {
+export function verificar(root: string, taskId: string | undefined, verdictArg: string | undefined, tokens = 100, calls = 1, detalle?: string, juez = "humano", archivosCSV?: string, url?: string, modo?: "png" | "dom"): VerifyResult {
   if (!taskId) return { code: 1, msg: "verify: task-id requerido" };
   const db = openDb(root);
   const t: any = db.prepare("SELECT * FROM tasks WHERE id=?").get(taskId);
@@ -121,19 +122,52 @@ export function verificar(root: string, taskId: string | undefined, verdictArg: 
     try { registrarLeccion(root, taskId, "error-juez", juez, d); } catch { /* la memoria nunca rompe el verify */ }
     return { code: 0, msg: `verify JUEZ-FALLIDO: ${taskId} (sin veredicto; sigue implementado)` };
   }
-  const verdict = verdictArg === "fail" ? "fail" : "pass";
-  const cmd = `axiom verify ${taskId} ${verdict}`;
-  const sha = createHash("sha256").update(`${taskId}:${verdict}:${Date.now()}`).digest("hex");
+  let verdict = verdictArg === "fail" ? "fail" : "pass";
+  // Captura browser (--url): primero la evidencia observable, después el
+  // veredicto. Si la captura falla no hay evidencia ni cambio de estado
+  // (fail closed). El artefacto se escribe en specs/active/<spec>/ junto a
+  // verification-<tarea>.md (mismo trato que el propio md: lo genera Axiom).
+  const dir = activeDir(root, t.spec_id);
+  let captura: { rel: string; sha: string; bytes: number; motor: string } | undefined;
+  let errorPagina: string | undefined;
+  let timeoutMs: number | undefined;
+  if (url) {
+    if (!moduloActivo(root, "browser")) return { code: 2, msg: "verify --url: módulo browser deshabilitado (habilítalo con `axiom module on browser`)" };
+    const cap = capturar(root, url, modo ?? "png", dir);
+    if (!cap.ok || !cap.ruta) return { code: 1, msg: `verify: captura fallida para ${url} — ${cap.error ?? "sin ruta de artefacto"}` };
+    const shaCaptura = createHash("sha256").update(readFileSync(cap.ruta)).digest("hex");
+    captura = { rel: relative(root, cap.ruta).split(sep).join("/"), sha: shaCaptura, bytes: cap.bytes ?? 0, motor: cap.motor ?? "—" };
+    // Página de error del navegador (DNS/conexión/TLS) ≠ URL cargada: si el
+    // juez pedía pass, el veredicto se ajusta a fail. Queda constancia en el
+    // verification.md, en el motivo de bloqueo y en el mensaje.
+    errorPagina = cap.errorPagina;
+    // Timeout de red: el motor colgó sin terminar. Hay parte de timeout como
+    // evidencia, pero la URL tampoco quedó cargada ⇒ mismo ajuste pass→fail.
+    timeoutMs = cap.timeoutMs;
+    if ((errorPagina || timeoutMs) && verdict === "pass") verdict = "fail";
+  }
+  // Texto del motivo negativo (una u otro): página de error o timeout de red.
+  const motivo = errorPagina ? `página de error del navegador (${errorPagina})` : timeoutMs ? `timeout de red (el motor superó ${timeoutMs} ms sin terminar la carga)` : undefined;
+  const ajuste = motivo && verdictArg !== "fail" ? " → veredicto ajustado de pass a fail" : "";
+  const cmd = captura
+    ? `axiom verify ${taskId} ${verdict} --url ${url}${modo === "dom" ? " --dom" : ""}`
+    : `axiom verify ${taskId} ${verdict}`;
+  // Firma: con captura, el sha256 es el del contenido capturado (trazable al
+  // byte); sin captura, la firma sintética de siempre.
+  const sha = captura ? captura.sha : createHash("sha256").update(`${taskId}:${verdict}:${Date.now()}`).digest("hex");
   // Artefactos declarados: existen y están en allowlist, si no no hay firma.
   const lista = (archivosCSV ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 20);
   if (lista.length > 0) {
     const v = validarArchivos(root, lista);
     if (!v.ok) return { code: 2, msg: `verify staging: ${v.fuera.join("; ")}` };
   }
+  if (captura) lista.push(captura.rel);
   const archTxt = lista.join("\n");
-  const dir = activeDir(root, t.spec_id);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `verification-${taskId}.md`), VERIFICATION_TEMPLATE(taskId, verdict, sha, cmd, juez, lista.join(", ")));
+  const md = VERIFICATION_TEMPLATE(taskId, verdict, sha, cmd, juez, lista.join(", "))
+    + (captura ? `**captura browser:** \`${captura.rel}\` · sha256 \`${captura.sha}\` · ${captura.bytes} B · motor ${captura.motor} · url ${url}\n` : "")
+    + (motivo ? `**nota:** ${motivo}${ajuste}\n` : "");
+  writeFileSync(join(dir, `verification-${taskId}.md`), md);
   asegurarColumnaArchivos(root);
   const db2 = openDb(root);
   db2.prepare("INSERT INTO evidences(task_id,cmd,exit,sha256,verdict,created_at,archivos) VALUES(?,?,?,?,?,?,?)").run(taskId, cmd, verdict === "pass" ? 0 : 1, sha, verdict, new Date().toISOString(), archTxt);
@@ -141,14 +175,14 @@ export function verificar(root: string, taskId: string | undefined, verdictArg: 
   db.prepare("UPDATE tasks SET estado=? WHERE id=?").run(verdict === "pass" ? "verificado" : "bloqueado", taskId);
   db.close();
   addConsumo(root, tokens, calls);
-  if (verdict === "fail") recordBloqueo(root, taskId, `verify fail ${sha.slice(0, 8)}`);
-  try { registrarLeccion(root, taskId, verdict, juez, detalle); } catch { /* la memoria nunca rompe el verify */ }
-  return { code: 0, msg: `verify OK: ${taskId} → ${verdict} (${sha.slice(0, 8)}, juez=${juez})` };
+  if (verdict === "fail") recordBloqueo(root, taskId, motivo ? `verify fail ${sha.slice(0, 8)} · ${motivo}` : `verify fail ${sha.slice(0, 8)}`);
+  try { registrarLeccion(root, taskId, verdict, juez, motivo ? `${detalle ?? ""} [${motivo}]`.trim() : detalle); } catch { /* la memoria nunca rompe el verify */ }
+  return { code: 0, msg: `verify OK: ${taskId} → ${verdict} (${sha.slice(0, 8)}, juez=${juez})${motivo ? ` · ${motivo.toUpperCase()}${ajuste.replace(" → veredicto ajustado de pass a fail", " (veredicto ajustado a fail)")}` : ""}${captura ? ` · captura ${captura.rel}` : ""}` };
 }
 
-export function cmdVerify(root: string, taskId?: string, verdictArg?: string, tokens = 100, calls = 1, detalle?: string, juez = "humano", archivosCSV?: string): void {
-  if (!taskId) { console.error("uso: axiom verify <task-id> [pass|fail|error] [--tokens N] [--calls M] [--detalle \"...\"] [--archivos \"a,b\"]"); process.exit(1); }
-  const r = verificar(root, taskId, verdictArg, tokens, calls, detalle, juez, archivosCSV);
+export function cmdVerify(root: string, taskId?: string, verdictArg?: string, tokens = 100, calls = 1, detalle?: string, juez = "humano", archivosCSV?: string, url?: string, modo?: "png" | "dom"): void {
+  if (!taskId) { console.error("uso: axiom verify <task-id> [pass|fail|error] [--tokens N] [--calls M] [--detalle \"...\"] [--archivos \"a,b\"] [--url <url> [--dom]]"); process.exit(1); }
+  const r = verificar(root, taskId, verdictArg, tokens, calls, detalle, juez, archivosCSV, url, modo);
   if (r.code === 2) { console.error(r.msg); process.exit(2); }
   if (r.code !== 0) { console.error(r.msg); process.exit(1); }
   console.log(r.msg);

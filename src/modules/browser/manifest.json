@@ -1,0 +1,15 @@
+{
+  "name": "browser",
+  "version": "0.1.0",
+  "axiom": "^0.9",
+  "scope": "global",
+  "default": false,
+  "description": "Fachada sobre un motor de navegador headless (Playwright cache o binarios del sistema): captura screenshot o DOM de una URL como evidencia. Fail soft si no hay motor.",
+  "contracts": ["browser.captura"],
+  "transports": ["cli", "web"],
+  "patterns": ["fail-closed", "single-source"],
+  "config_file": "browser.config.json",
+  "panel": { "tipo": "lista" },
+  "editables": ["manifest.json", "index.ts", "config.ts"],
+  "cli": ["browser", "browser <url> [--dom]", "module datos browser"]
+}

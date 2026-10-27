@@ -818,6 +818,130 @@
         }
       }
     },
+    "/api/verify": {
+      "post": {
+        "operationId": "verifyTarea",
+        "summary": "Verifica una tarea con captura browser opcional",
+        "description": "Delega en verificar() (mismo núcleo que la CLI): registra evidencia y cambia el estado de la tarea. Con url, captura PNG (o DOM con modo=dom) junto a verification-<tarea>.md; si el navegador muestra una página de error o el motor supera su límite (timeout de red, con parte de timeout como evidencia), el veredicto pass se ajusta a fail. 200 = veredicto registrado (pass o fail), 409 = fail closed (módulo browser apagado o staging), 400 = validación, tarea inexistente o captura fallida.",
+        "tags": [
+          "vistas"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "taskId"
+                ],
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "description": "id de la tarea (tasks.id)"
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "fail",
+                      "error"
+                    ],
+                    "description": "por defecto pass"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "http(s) a capturar como evidencia"
+                  },
+                  "modo": {
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "dom"
+                    ],
+                    "default": "png"
+                  },
+                  "detalle": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "lección opcional para experience"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Veredicto registrado (pass o fail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "msg"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "integer"
+                    },
+                    "msg": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validación, tarea inexistente o captura fallida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "msg": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Fail closed: módulo browser deshabilitado o staging rechazado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "integer"
+                    },
+                    "msg": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/proyecto": {
       "get": {
         "operationId": "proyecto",
