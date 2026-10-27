@@ -190,9 +190,10 @@ La web no es una consola más: es el panel de control del harness. Incluye chat 
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
-| `/` | GET | UI completa (chat, orquestación, trabajo, ajustes) |
+| `/` | GET | UI completa (chat, orquestación, trazas, trabajo, ajustes) |
 | `/api/orquestacion` | GET | Techo, tareas, aprobaciones, usos |
 | `/api/trabajo` | GET | Specs con tareas y estados |
+| `/api/trazas` | GET | Trazas de tool calls (AXM-066) con línea formateada |
 | `/api/adapters/config` | GET/POST | Config LLM |
 | `/api/adapters/spawn` | POST | Spawn de tarea LLM |
 | `/api/adapters/modelos` | GET | Modelos disponibles |

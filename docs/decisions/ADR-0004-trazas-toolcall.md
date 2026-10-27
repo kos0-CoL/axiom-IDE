@@ -28,15 +28,20 @@ Traza **local-first en SQLite** (`trace_log`), sin dependencias nuevas:
    produjo (mismo principio que "la memoria nunca rompe el verify").
 4. **Consulta:** `axiom status --trace <tarea>` añade `trazas=N` y lista las
    trazas cuyo `contexto` nombra la tarea (p. ej. `run <spec>/<tarea>`);
-   `axiom status --trace` sin id muestra las últimas 10 globales.
+   `axiom status --trace` sin id muestra las últimas 10 globales. La misma
+   consulta sirve la web: `GET /api/trazas` (openapi) y la vista **Trazas** del
+   panel reutilizan `listTrazas` + `lineaTraza`, así que CLI y panel no
+   divergen ni en la query ni en el formato.
 
 ## Consecuencias
 
 - El criterio de AXM-066 es verificable desde CLI: qué tool, quién, qué decidió,
   cuánto tardó y el IO, en una línea por llamada.
 - **Fuera de alcance, deliberadamente:** export OTel/Langfuse (el stack entero
-  sigue siendo opcional en E5; añadirlo no cambia el criterio), panel web de
-  trazas (posible `GET /api/trazas` + openapi más adelante) y compaction de
+  sigue siendo opcional en E5; añadirlo no cambia el criterio) y compaction de
   memoria (gap aparte de ADR-0002).
-- Cubierto por `test/trazas.test.ts` (5 tests) y el caso `trazas-toolcall` de
-  `npm run evals` (línea base de 16 casos).
+- Cubierto por `test/trazas.test.ts` (5 tests), `test/trazas-api.test.ts`
+  (GET /api/trazas + vista del panel) y en `npm run evals` por los casos
+  `trazas-toolcall` (CLI) y `api-trazas` (servidor real: endpoint + vista +
+  filtro y límites) — suite de 18 casos en 5 grupos; la línea base guarda 17,
+  el grupo trayectoria va omitido sin proveedor.

@@ -1,5 +1,5 @@
 // A4 — TUI mínima: 2 vistas mismo store SQLite + consola broker
-import { getConsumo, listUsos, openDb } from "./store.js";
+import { getConsumo, listTrazas, listUsos, openDb, type TrazaLeida } from "./store.js";
 import { loadPolicies } from "./policy.js";
 import { asegurarColumnaArchivos } from "./staging.js";
 
@@ -91,4 +91,11 @@ export function renderTrabajo(root: string): string {
   if ((specs as any[]).length === 0) out.push("  (sin specs; corre axiom spec)");
   out.push("Sin evidencia no hay verde. Verificación = cmd+salida+hash.");
   return out.join("\n");
+}
+
+// JSON para la web: mismas filas que `axiom status --trace` (AXM-066),
+// ordenadas de más reciente a más antigua. El formato de línea lo aplica
+// web.ts con lineaTraza, la misma función de la CLI: sin divergencia.
+export function datosTrazas(root: string, contexto?: string, limite = 50): TrazaLeida[] {
+  return listTrazas(root, limite, contexto || undefined);
 }

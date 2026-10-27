@@ -941,7 +941,53 @@
           }
         }
       }
+    },    "/api/trazas": {
+      "get": {
+        "operationId": "getTrazas",
+        "summary": "Lista las trazas de tool calls",
+        "description": "Últimas filas de trace_log en orden descendente (AXM-066), con `linea`: el mismo formato de texto que `axiom status --trace`. `contexto` filtra por LIKE (p. ej. `run <spec>/<tarea>`). Best-effort: sin trazas devuelve la lista vacía, como la CLI.",
+        "tags": [
+          "vistas"
+        ],
+        "parameters": [
+          {
+            "name": "contexto",
+            "in": "query",
+            "required": false,
+            "description": "Filtro LIKE sobre trace_log.contexto",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "description": "Cuántas trazas devolver (1-200)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trazas de más reciente a más antigua",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrazasView"
+                }
+              }
+            }
+          }
+        }
+      }
     },
+
     "/api/proyecto": {
       "get": {
         "operationId": "proyecto",
@@ -2306,6 +2352,113 @@
   },
   "components": {
     "schemas": {
+      "Traza": {
+        "type": "object",
+        "description": "Una tool call decidida por el broker (tabla trace_log): IO truncado a 500 caracteres + sha256 del IO completo.",
+        "required": [
+          "id",
+          "ts",
+          "origen",
+          "tool",
+          "decision",
+          "entrada",
+          "salida",
+          "sha_io",
+          "contexto",
+          "ok",
+          "ms",
+          "linea"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "origen": {
+            "type": "string",
+            "description": "quién disparó la llamada: cli | web | run | telegram | handoff"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "agente": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny",
+              "ask"
+            ]
+          },
+          "riesgo": {
+            "type": "string"
+          },
+          "motivo": {
+            "type": "string"
+          },
+          "approval_id": {
+            "type": "string"
+          },
+          "entrada": {
+            "type": "string"
+          },
+          "salida": {
+            "type": "string"
+          },
+          "sha_io": {
+            "type": "string",
+            "description": "sha256 del IO completo, antes de truncar"
+          },
+          "contexto": {
+            "type": "string",
+            "description": "p. ej. run <spec>/<tarea>"
+          },
+          "ok": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "linea": {
+            "type": "string",
+            "description": "mismo formato de texto que axiom status --trace"
+          }
+        }
+      },
+      "TrazasView": {
+        "type": "object",
+        "required": [
+          "ok",
+          "trazas"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "limite": {
+            "type": "integer"
+          },
+          "contexto": {
+            "type": "string"
+          },
+          "trazas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Traza"
+            }
+          }
+        }
+      },
       "Orquestacion": {
         "type": "object",
         "required": [
