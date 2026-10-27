@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // cli.ts — composition root delgado: parsea --root/args y despacha a commands.ts.
 import { resolve } from "node:path";
-import { flagNum, flagStr, cmdInit, cmdSpec, cmdPlan, cmdTasks, cmdVerify, cmdDecide, cmdRun, cmdStatus, cmdValidate, cmdCheck, cmdUi, cmdServe, cmdValidateTokens, cmdValidateOpenApi, cmdCycle, cmdEvalComp, cmdRemoveComp, cmdDiffComp, cmdCompareComp, cmdBatterySet, cmdBatteryShow, cmdBatteryList, cmdBatteryClear, cmdSpawn, cmdExperiencia, cmdProponerHarness, cmdPropuestasHarness, cmdVerPropuesta, cmdDecidirPropuesta, cmdSnapshot, cmdModuloDatos, cmdModuloCrear, cmdModuloRegen, cmdCompat, crear, rollback, marcarEstable, listar } from "./commands.js";
+import { flagNum, flagStr, cmdInit, cmdSpec, cmdPlan, cmdTasks, cmdVerify, cmdDecide, cmdRun, cmdStatus, cmdMemory, cmdValidate, cmdCheck, cmdUi, cmdServe, cmdValidateTokens, cmdValidateOpenApi, cmdCycle, cmdEvalComp, cmdRemoveComp, cmdDiffComp, cmdCompareComp, cmdBatterySet, cmdBatteryShow, cmdBatteryList, cmdBatteryClear, cmdSpawn, cmdExperiencia, cmdProponerHarness, cmdPropuestasHarness, cmdVerPropuesta, cmdDecidirPropuesta, cmdSnapshot, cmdModuloDatos, cmdModuloCrear, cmdModuloRegen, cmdCompat, crear, rollback, marcarEstable, listar } from "./commands.js";
 import { statusText, notifyApproval, handleCallback, bloqueosText, consumoText, allowChatId, unallowChatId, setExpiracion, setEnabled as tgEnabled, configText, notifyChat, runPolling, tokenFromEnv, setWebhook, sendMessage } from "./telegram.js";
 import { getSecret } from "./secrets.js";
 const tgToken = (root: string): string | undefined => getSecret(root, "AXIOM_TELEGRAM_BOT_TOKEN") ?? tokenFromEnv();
@@ -73,7 +73,8 @@ else if (cmd === "plan") cmdPlan(root, rest[0]);
 else if (cmd === "tasks") cmdTasks(root, rest[0]);
 else if (cmd === "verify") { const t = flagNum(rest, "--tokens", 100); const c = flagNum(t.resto, "--calls", 1); const d = flagStr(c.resto, "--detalle"); const a = flagStr(d.resto, "--archivos"); const u = flagStr(a.resto, "--url"); cmdVerify(root, u.resto[0], u.resto[1], t.valor, c.valor, d.valor, "humano", a.valor, u.valor, u.resto.includes("--dom") ? "dom" : "png"); }
 else if (cmd === "run") { const r = flagNum(rest, "--rondas", 3); const t = flagNum(r.resto, "--tokens", 50); const c = flagNum(t.resto, "--calls", 1); const pos = c.resto.filter((x) => x !== "--dry-run" && x !== "--agente"); await cmdRun(root, pos[0], r.valor, t.valor, c.valor, c.resto.includes("--dry-run"), c.resto.includes("--agente")); }
-else if (cmd === "status" && rest[0] === "--trace") cmdStatus(root, rest[1]);
+else if (cmd === "memory") { const a = flagStr(rest, "--keep"); const dry = a.resto.includes("--dry-run"); const limpio = a.resto.filter((x) => x !== "--dry-run"); cmdMemory(root, limpio[0], a.valor, dry); }
+else if (cmd === "status" && rest[0] === "--trace") cmdStatus(root, rest[1], true);
 else if (cmd === "status") cmdStatus(root);
 else if (cmd === "validate-spec") cmdValidate(root);
 else if (cmd === "ui") cmdUi(root);

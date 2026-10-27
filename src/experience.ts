@@ -68,6 +68,110 @@ export function textoExperiencia(root: string, limit = 5): string {
     .join("\n\n---\n\n");
 }
 
+// --- Memoria entre sesiones (ADR-0005) ---
+// Estrategia por capas: la auditoría (evidences, trace_log, handoff_log,
+// bloqueos, aprobaciones) NUNCA se poda; los logs de actividad ya traen
+// retención (uso_log ≤50, trace_log ≤500); lo que crece sin cota —
+// EXPERIENCE.md y mensajes de sesiones ARCHIVADAS — solo se compacta de forma
+// EXPLÍCITA con `axiom memory compact`. Sin podas automáticas silenciosas.
+
+const KEEP_LECCIONES = 50;
+const KEEP_MENSAJES = 200;
+const TABLAS_AUDITORIA = ["evidences", "trace_log", "handoff_log", "bloqueos", "aprobaciones"];
+
+// Estado de la memoria: qué crece, qué ya tiene retención y qué es accionable.
+export function estadoMemoria(root: string): string {
+  asegurarExperience(root);
+  const raw = readFileSync(join(root, EXPERIENCE_FILE), "utf8");
+  const lecciones = raw.split(/^## /m).filter((s) => s.trim() && !s.startsWith("# EXPERIENCE")).length;
+  const lineas = [`EXPERIENCE.md: ${Buffer.byteLength(raw)} B · ${lecciones} lección(es)`];
+  const db = openDb(root);
+  try {
+    const contar = (t: string): number => {
+      try { return ((db.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as { c?: number } | undefined)?.c ?? 0); } catch { return -1; }
+    };
+    const tablas = ["chat_messages", "chat_sessions", ...TABLAS_AUDITORIA, "uso_log", "trace_log"];
+    lineas.push(`tablas: ${[...new Set(tablas)].map((t) => { const n = contar(t); return `${t}=${n < 0 ? "sin crear" : n}`; }).join(" · ")}`);
+    lineas.push("retención automática: uso_log≤50 · trace_log≤500");
+    lineas.push(`auditoría (nunca se poda): ${TABLAS_AUDITORIA.join(", ")}`);
+  } finally {
+    db.close();
+  }
+  lineas.push("accionable: axiom memory compact [--keep N] [--dry-run]");
+  return `memoria de ${root}\n  ${lineas.join("\n  ")}`;
+}
+
+export interface Compactacion {
+  dryRun: boolean;
+  lecciones: { antes: number; despues: number; podadas: number };
+  mensajes: { podados: number; sesiones: number };
+  vacuum: string;
+}
+
+// Compactación explícita (ADR-0005): EXPERIENCE.md a las últimas `keep`
+// lecciones (con nota de poda en el propio archivo: el olvido queda registrado)
+// y mensajes de sesiones archivadas a los últimos `keepMensajes` por sesión.
+// dry-run calcula y no escribe nada. La auditoría no se toca.
+export function compactarMemoria(
+  root: string,
+  opts: { keepLecciones?: number; keepMensajes?: number; dryRun?: boolean } = {},
+): Compactacion {
+  const keep = Number.isInteger(opts.keepLecciones) && (opts.keepLecciones as number) >= 1
+    ? Math.min(opts.keepLecciones as number, 10000)
+    : KEEP_LECCIONES;
+  const keepMsg = Number.isInteger(opts.keepMensajes) && (opts.keepMensajes as number) >= 1
+    ? Math.min(opts.keepMensajes as number, 100000)
+    : KEEP_MENSAJES;
+  const dry = opts.dryRun === true;
+  asegurarExperience(root);
+
+  // 1) EXPERIENCE.md: quedarse con las últimas `keep` lecciones.
+  const p = join(root, EXPERIENCE_FILE);
+  const raw = readFileSync(p, "utf8");
+  const idx = raw.search(/^## /m);
+  const cabecera = idx >= 0 ? raw.slice(0, idx) : raw;
+  const cuerpo = idx >= 0 ? raw.slice(idx) : "";
+  const lecciones = cuerpo.split(/^## /m).filter((s) => s.trim());
+  const antes = lecciones.length;
+  const podadas = Math.max(0, antes - keep);
+  if (podadas > 0 && !dry) {
+    const nota = `> Última poda: ${new Date().toISOString()} — ${podadas} lección(es) anterior(es) eliminadas (keep=${keep}).`;
+    const cab = cabecera.replace(/^> Última poda:[^\n]*\n+/m, "").trimEnd();
+    const nuevo = `${cab}\n\n${nota}\n\n${lecciones.slice(podadas).map((l) => `## ${l.trim()}`).join("\n\n")}\n`;
+    writeFileSync(p, nuevo);
+  }
+
+  // 2) Sesiones ARCHIVADAS: conservar los últimos `keepMensajes` de cada una.
+  //    Las sesiones activas no se tocan jamás (el usuario sigue en ellas).
+  let podados = 0;
+  let sesiones = 0;
+  const db = openDb(root);
+  try {
+    const archivadas = db.prepare("SELECT id FROM chat_sessions WHERE archivada=1").all() as unknown as { id: string }[];
+    for (const s of archivadas) {
+      const fuera = db
+        .prepare("SELECT COUNT(*) c FROM chat_messages WHERE session_id=? AND id NOT IN (SELECT id FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?)")
+        .get(s.id, s.id, keepMsg) as { c?: number } | undefined;
+      const n = fuera?.c ?? 0;
+      if (n <= 0) continue;
+      sesiones++;
+      if (dry) { podados += n; continue; }
+      const r = db
+        .prepare("DELETE FROM chat_messages WHERE session_id=? AND id NOT IN (SELECT id FROM chat_messages WHERE session_id=? ORDER BY id DESC LIMIT ?)")
+        .run(s.id, s.id, keepMsg);
+      podados += Number(r.changes ?? 0);
+    }
+    // 3) Vacuum solo si algo se podó (y nunca en dry-run).
+    let vacuum = "sin cambios";
+    if (!dry && (podadas > 0 || podados > 0)) {
+      try { db.exec("VACUUM"); vacuum = "ok"; } catch (e) { vacuum = `no disponible: ${e instanceof Error ? e.message : String(e)}`; }
+    }
+    return { dryRun: dry, lecciones: { antes, despues: antes - podadas, podadas }, mensajes: { podados, sesiones }, vacuum };
+  } finally {
+    db.close();
+  }
+}
+
 function tablaPropuestas(root: string): void {
   const db = openDb(root);
   db.exec(

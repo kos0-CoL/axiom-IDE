@@ -9,7 +9,7 @@ import { SPEC_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE, VERIFICATION_TEMPLATE, OV
 import { check, decide } from "./broker.js";
 import { cicloImproductivo, checkTecho } from "./policy.js";
 import { huellaConfig, leerMarca, marcarRun, textoSnapshot } from "./runmark.js";
-import { asegurarExperience, registrarLeccion, textoExperiencia, proponerAjuste, textoPropuestas, verPropuesta, decidirPropuesta } from "./experience.js";
+import { asegurarExperience, registrarLeccion, textoExperiencia, proponerAjuste, textoPropuestas, verPropuesta, decidirPropuesta, estadoMemoria, compactarMemoria } from "./experience.js";
 import { validarTodasSuperficies, nombresConocidos, moduloActivo, crearModulo, regenModulo, textoCompat } from "./modulos.js";
 import { archivosFueraDeAllow, asegurarColumnaArchivos, validarArchivos } from "./staging.js";
 import { renderOrquestacion, renderTrabajo, datosOrquestacion, datosTrabajo } from "./ui.js";
@@ -427,6 +427,30 @@ export function cmdCheck(root: string, tool?: string, agente?: string): void {
   const quien = agente ? ` (agente ${agente})` : "";
   console.log(`check ${tool}${quien}: ${r.decision} (riesgo=${r.riesgo}) — ${r.motivo}${r.id ? ` id=${r.id}` : ""}`);
   if (r.decision === "deny") process.exit(2);
+}
+
+// axiom memory [estado|compact [--keep N] [--dry-run]] — ADR-0005.
+// Estado = qué crece y qué ya tiene retención; compact = poda EXPLÍCITA de lo
+// que no tiene cota (nunca la auditoría). Dry-run calcula sin escribir.
+export function cmdMemory(root: string, sub?: string, keepTxt?: string, dryRun = false): void {
+  if (sub === undefined || sub === "estado") {
+    console.log(estadoMemoria(root));
+    return;
+  }
+  if (sub !== "compact") {
+    console.error("uso: axiom memory [estado|compact [--keep N] [--dry-run]]");
+    process.exit(2);
+  }
+  let keep: number | undefined;
+  if (keepTxt !== undefined) {
+    keep = parseInt(keepTxt, 10);
+    if (!Number.isInteger(keep) || keep < 1) { console.error("--keep debe ser entero >=1"); process.exit(2); }
+  }
+  const r = compactarMemoria(root, { keepLecciones: keep, dryRun });
+  const modo = r.dryRun ? " (dry-run, nada escrito)" : "";
+  console.log(
+    `memory compact${modo}: EXPERIENCE.md ${r.lecciones.antes} → ${r.lecciones.despues} lecciones (podadas ${r.lecciones.podadas}) · mensajes de sesiones archivadas podados ${r.mensajes.podados} en ${r.mensajes.sesiones} sesión(es) · vacuum ${r.vacuum}`,
+  );
 }
 
 export function cmdExperiencia(root: string, limite?: string): void {

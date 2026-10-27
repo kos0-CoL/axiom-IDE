@@ -42,6 +42,8 @@ axiom run mi-feature --dry-run --agente          # simula sin gastar
 ```bash
 axiom status                     # vista general del proyecto
 axiom status --trace <task>      # evidencia, hash, juez, bloqueos
+axiom memory                     # estado de la memoria: qué crece y qué tiene retención
+axiom memory compact --dry-run   # poda explícita (EXPERIENCE.md / sesiones archivadas)
 axiom ui                         # TUI: orquestación + trabajo
 ```
 
