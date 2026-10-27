@@ -1,0 +1,75 @@
+{
+  "creado": "2026-10-27T15:55:35.667Z",
+  "axiom": "0.9.31",
+  "casos": {
+    "build": {
+      "ok": true,
+      "ms": 1799
+    },
+    "boundaries": {
+      "ok": true,
+      "ms": 27
+    },
+    "seeds": {
+      "ok": true,
+      "ms": 59
+    },
+    "webjs": {
+      "ok": true,
+      "ms": 270
+    },
+    "superficie": {
+      "ok": true,
+      "ms": 344
+    },
+    "openapi": {
+      "ok": true,
+      "ms": 271
+    },
+    "tokens": {
+      "ok": true,
+      "ms": 267
+    },
+    "modulos-contrato": {
+      "ok": true,
+      "ms": 245
+    },
+    "verify-inexistente": {
+      "ok": true,
+      "ms": 275
+    },
+    "verify-juez-error": {
+      "ok": true,
+      "ms": 308
+    },
+    "verify-staging": {
+      "ok": true,
+      "ms": 271
+    },
+    "verify-browser-off": {
+      "ok": true,
+      "ms": 918
+    },
+    "verify-pagina-error": {
+      "ok": true,
+      "ms": 939
+    },
+    "verify-timeout": {
+      "ok": true,
+      "ms": 2302
+    },
+    "api-verify": {
+      "ok": true,
+      "ms": 588
+    },
+    "trazas-toolcall": {
+      "ok": true,
+      "ms": 1089
+    }
+  },
+  "resumen": {
+    "total": 16,
+    "ok": 16,
+    "omitidos": 0
+  }
+}
