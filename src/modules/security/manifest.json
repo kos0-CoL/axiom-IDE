@@ -1,0 +1,15 @@
+{
+  "name": "security",
+  "version": "0.1.0",
+  "axiom": "^0.9",
+  "scope": "global",
+  "default": false,
+  "description": "Inventario de controles de seguridad: skills del catálogo (seg-*, policy, sandbox), política global (tools/techo) y overrides de skills/<id>/SKILL.md del proyecto. Solo lectura.",
+  "contracts": ["security.controles"],
+  "transports": ["cli", "web"],
+  "patterns": ["fail-closed", "single-source"],
+  "config_file": "security.config.json",
+  "panel": { "tipo": "lista" },
+  "editables": ["manifest.json", "index.ts", "config.ts"],
+  "cli": ["module datos security"]
+}

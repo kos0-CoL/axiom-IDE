@@ -121,7 +121,7 @@ export const AGENTES_SEMILLA: readonly AgenteSemilla[] = [
     rol: "especializado",
     modelo: "hereda-proveedor",
     estado: "activo",
-    skills: ["policy", "sandbox", "seguridad"],
+    skills: ["policy", "sandbox", "seguridad", "sec-threat-model", "sec-cve", "sec-hardening", "sec-injection", "sec-auth", "sec-net"],
     instrucciones: "Revisa secretos, permisos, validación de entrada, dependencias nuevas y cambios de CI/configuración. Mínimo privilegio y aislamiento.",
     herramientas: [
       { tool: "leer", acceso: "allow" },
