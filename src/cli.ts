@@ -36,6 +36,11 @@ else if (cmd === "speckit" && rest[0] === "converge") {
     for (const t of d.pendientes) console.log(`  pendiente ${t.id} (spec ${t.spec}): ${t.titulo}`);
   }
 }
+else if (cmd === "grafos" && rest[0] === "mermaid") {
+  if (!moduloActivo(root, "grafos")) { console.error("módulo grafos deshabilitado (fail closed): habilítalo con `axiom module on grafos`"); process.exit(2); }
+  const { mermaidGrafos } = await import("./modules/grafos/index.js");
+  console.log(mermaidGrafos(root));
+}
 else if (cmd === "grafos" && rest[0] === "ver") {
   if (!moduloActivo(root, "grafos")) { console.error("módulo grafos deshabilitado (fail closed): habilítalo con `axiom module on grafos`"); process.exit(2); }
   const { datosGrafos } = await import("./modules/grafos/index.js");

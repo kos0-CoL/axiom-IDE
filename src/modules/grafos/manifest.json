@@ -15,5 +15,5 @@
   "config_file": "grafos.config.json",
   "panel": { "tipo": "grafo" },
   "editables": ["manifest.json", "index.ts", "config.ts"],
-  "cli": ["grafos ver"]
+  "cli": ["grafos ver", "grafos mermaid"]
 }

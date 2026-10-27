@@ -114,6 +114,38 @@ export function datosGrafos(root: string): DatosGrafos {
   return { intended: inten, executed: ejec, vacio };
 }
 
+// Diagrama revisable: traduce una vista a Mermaid `flowchart TD` para pegarlo
+// en ADRs, specs o README. Escapa labels y normaliza ids al conjunto seguro.
+function aMermaid(v: GrafoVista): string {
+  const id = (s: string): string => {
+    const limpio = (s || "nodo").replace(/[^A-Za-z0-9_]/g, "_");
+    return /^[0-9]/.test(limpio) ? `n_${limpio}` : limpio || "nodo";
+  };
+  const label = (s: string): string => (s || "—").replace(/"/g, "'");
+  const lin: string[] = ["flowchart TD"];
+  lin.push(`  ${id(v.centro)}["${label(v.centro)} (centro)"]`);
+  for (const n of v.nodos) lin.push(`  ${id(n.id)}["${label(n.id)}${n.nota ? ` · ${label(n.nota)}` : ""}"]`);
+  for (const a of v.aristas) {
+    const nota = a.nota ? `|${label(a.nota)}|` : "";
+    lin.push(`  ${id(a.de)} -->${nota} ${id(a.a)}`);
+  }
+  return lin.join("\n");
+}
+
+export function mermaidGrafos(root: string): string {
+  const d = datosGrafos(root);
+  if (d.vacio) {
+    return "%% grafos: sin handoffs ni evidencias todavía (usa `axiom agents handoff` y `axiom verify`)";
+  }
+  return [
+    "%% intended — lo planeado (agents.config.json)",
+    aMermaid(d.intended),
+    "",
+    "%% executed — lo observado (handoff_log + evidences)",
+    aMermaid(d.executed),
+  ].join("\n");
+}
+
 export function estadoTexto(): string {
   return `grafos: intended vs executed (usa agents.config.json + handoff_log + evidences)`;
 }

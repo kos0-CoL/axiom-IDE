@@ -2,8 +2,9 @@
 
 Comandos probados (Bun 1.4+):
 - `bun install && bun run build`
-- `bun src/cli.ts --root <dir> init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|adapters|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi (flags: --rondas, --tokens, --calls, --cmd, --image, --timeout, --dry-run, --detalle, --archivos)`
+- `bun src/cli.ts --root <dir> init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|adapters|module|ui|status|validate-spec|serve|browser|grafos|memory|validate-tokens|validate-openapi (flags: --rondas, --tokens, --calls, --cmd, --image, --timeout, --dry-run, --detalle, --archivos, --url, --dom, --keep)`
 - `node scripts/check-boundaries.mjs`
+- `npm run evals` (suite con línea base: compara contra `evals/baseline.json`; `-- --write-baseline` la reescribe solo si todo pasa, `-- --no-build` usa dist actual). Regresión = caso ok en base que ahora falla.
 
 Reglas:
 - Global > proyecto; sin respuesta ≠ aprobación; Telegram es canal.
