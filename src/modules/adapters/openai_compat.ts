@@ -146,7 +146,11 @@ export async function fetchOpenRouterModels(baseUrl: string, key: string, timeou
       const out: OpenRouterModelo = { id };
       if (esGratis(id, m.pricing)) out.free = true;
       modelos.push(out);
-      if (modelos.length >= 300) break;
+      // Sin recorte: solo se guardan id/free (~16 KB con 462 modelos, medido contra
+      // el catálogo real). El tope anterior de 300 dejaba fuera de la lista modelos
+      // vivos por su posición —anthropic/claude-sonnet-4.5 iba en la 328— y parecía
+      // que la key no se había tomado.
+      if (modelos.length >= 2000) break;
     }
     return { ok: true, modelos };
   } catch (e) {

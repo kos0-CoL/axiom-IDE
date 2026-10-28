@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { asegurarProyecto } from "../dist/proyectos.js";
 import { decide } from "../dist/broker.js";
+import { datosOrquestacion } from "../dist/ui.js";
 import { loadAgents, saveAgents } from "../dist/modules/agents/config.js";
 import { declaracionDeAprobacion } from "../dist/modules/agents/declaracion.js";
 import { autorizarUso, ejecutarTareaGrafo } from "../dist/modules/agents/ejecucion.js";
@@ -93,6 +94,27 @@ test("ask abre una solicitud; aprobarla autoriza un solo uso y el siguiente vuel
     const otra = autorizarUso(root, "implementador", "editar", EDITAR);
     assert.equal(otra.decision, "ask");
     assert.notEqual(otra.id, primera.id, "una aprobación no es un permiso permanente");
+  }));
+
+test("Aprobaciones muestra cuándo se consumió la concesión y qué corrida la gastó", () =>
+  conProyecto((root) => {
+    politicas(root, { editar: true }, { editar: true });
+    const pedido = autorizarUso(root, "implementador", "editar", EDITAR);
+    decide(root, pedido.id!, true, "web", 30, declaracionDeAprobacion(root, pedido.id!));
+
+    assert.equal(autorizarUso(root, "implementador", "editar", EDITAR, "run spec-x/T1").decision, "allow");
+
+    // La vista no deja «usada» como texto opaco: hora del consumo y quién la gastó.
+    const fila = datosOrquestacion(root).aprobaciones.find((a) => a.id === pedido.id);
+    assert.ok(fila);
+    assert.equal(fila!.estado, "usada");
+    assert.equal(fila!.usada_por, "run spec-x/T1");
+    assert.ok(!Number.isNaN(new Date(fila!.usada_at).getTime()), "usada_at debe ser una fecha ISO");
+
+    // Y decidirla otra vez no reescribe nada: ya estaba gastada.
+    const otra = decide(root, pedido.id!, true, "web", 30, declaracionDeAprobacion(root, pedido.id!));
+    assert.equal(otra.aplicada, false);
+    assert.equal(otra.estado, "usada");
   }));
 
 test("una aprobación concedida no se consume si el agente ya no la declara", () =>

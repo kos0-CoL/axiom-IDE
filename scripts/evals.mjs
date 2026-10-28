@@ -480,6 +480,171 @@ const casos = [
     },
   },
   {
+    // ADR-0006: el agente conduce un navegador con la misma disciplina que el
+    // resto de herramientas — aprobación humana de un solo uso, traza con
+    // origen, límites de sesión — y la web expone la misma fachada (200/400/409).
+    // Sin motor el caso se OMITE justificado: nunca asume que pasó.
+    id: "browser-tool",
+    grupo: "e2e",
+    async ejecutar(ctx) {
+      const browser = await import(pathToFileURL(join(raiz, "dist", "modules", "browser", "index.js")).href);
+      if (!browser.detectarMotor(ctx.root)) {
+        return { omitido: "sin motor de navegador (instala Chromium o la caché de Playwright para activarlo)" };
+      }
+      const modulos = await import(pathToFileURL(join(raiz, "dist", "modulos.js")).href);
+      const moduloPrevia = modulos.moduloActivo(ctx.root, "browser");
+      const polPath = join(ctx.root, "policies.global.json");
+      let polPrev = "";
+      try { polPrev = readFileSync(polPath, "utf8"); } catch { /* init aún no lo escribió */ }
+      const cfgPath = join(ctx.root, "browser.config.json");
+      let cfgPrev = "";
+      try { cfgPrev = readFileSync(cfgPath, "utf8"); } catch { /* sin config previa */ }
+
+      // `abrir` es openWorld → riesgo alto: pide aprobación humana por uso.
+      let pol = {};
+      try { pol = polPrev ? JSON.parse(polPrev) : {}; } catch { pol = {}; }
+      pol.tools = { ...(pol.tools ?? {}), "browser.abrir": true };
+      writeFileSync(polPath, JSON.stringify(pol, null, 2) + "\n");
+      cli(ctx.root, ["module", "on", "browser"]);
+
+      const marcador = "MARCADOR EVALS BROWSER";
+      // La página objetivo vive en UN PROCESO PROPIO: la consola CLI se ejecuta
+      // con spawnSync (bloquea este bucle de eventos), así que un servidor aquí
+      // dentro no respondería mientras la CLI corre y la navegación colgaría.
+      const puertoPagina = await puertoLibre();
+      const pagina = spawn(
+        process.execPath,
+        ["-e", "require('node:http').createServer((q,s)=>{s.writeHead(200,{'content-type':'text/html; charset=utf-8'});s.end('<!doctype html><html lang=es><body><h1>'+process.env.MARCADOR+'</h1></body></html>')}).listen(Number(process.env.PUERTO),'127.0.0.1')"],
+        { cwd: raiz, stdio: "ignore", env: { ...process.env, MARCADOR: marcador, PUERTO: String(puertoPagina) } },
+      );
+      const url = `http://127.0.0.1:${puertoPagina}/`;
+      const errores = [];
+      // Dos hosts, una sola fachada: el servidor web (larga duración) conduce
+      // la sesión entre peticiones y la CLI conduce la suya en su propio
+      // proceso por stdin — mismo broker, mismos límites, mismo origen en traza.
+      let cfg = {};
+      try { cfg = cfgPrev ? JSON.parse(cfgPrev) : {}; } catch { cfg = {}; }
+      const optarNoSandbox = () => { cfg = { ...cfg, noSandbox: true }; writeFileSync(cfgPath, JSON.stringify(cfg) + "\n"); };
+      const aprobar = (id) => cli(ctx.root, ["approve", id]).code === 0;
+      const idAprobable = (texto) => (String(texto ?? "").match(/necesita aprobación \(([^)]+)\)/) ?? [])[1];
+      const puerto = await puertoLibre();
+      const hijo = spawn(process.execPath, [CLI, "--root", ctx.root, "serve", String(puerto)], { cwd: raiz, stdio: "ignore" });
+      let fase = "levantar servidor";
+      try {
+        const base = `http://127.0.0.1:${puerto}`;
+        if (!(await esperarHttp(`${base}/`))) return { ok: false, detalle: "el servidor no levantó" };
+        if (!(await esperarHttp(url))) return { ok: false, detalle: "la página objetivo no levantó" };
+        const accion = async (cuerpo) => {
+          const r = await fetch(`${base}/api/browser/accion`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
+          return { status: r.status, ...(await r.json().catch(() => ({}))) };
+        };
+        const listar = async () => {
+          const r = await fetch(`${base}/api/browser/sesiones`);
+          return { status: r.status, ...(await r.json().catch(() => ({}))) };
+        };
+
+        // 1) Petición mal formada → 400 (lo demás es fail closed 409).
+        fase = "web: petición mal formada";
+        const mala = await accion({ accion: "volar" });
+        if (mala.status !== 400) errores.push(`acción desconocida → ${mala.status} (esperado 400)`);
+
+        // 2) Flujo web completo: pedir → aprobar → consumir UN uso → leer/cerrar.
+        fase = "web: abrir";
+        let sesion = "";
+        for (let i = 0; i < 6 && !sesion; i++) {
+          const r = await accion({ accion: "abrir", args: { url } });
+          if (r.status === 200 && r.ok) { sesion = String(r.datos?.sesion ?? ""); break; }
+          const id = idAprobable(r.msg);
+          if (id) { if (!aprobar(id)) return { ok: false, detalle: `approve ${id} falló: ${r.msg}` }; continue; }
+          // Este host puede bloquear los user namespaces de Chromium (AppArmor).
+          if (/pestaña|sandbox/i.test(String(r.msg ?? "")) && !cfg.noSandbox) { optarNoSandbox(); continue; }
+          errores.push(`abrir web → ${r.status} ${String(r.msg ?? "").slice(0, 160)}`);
+          break;
+        }
+        if (!sesion) errores.push("la sesión no abrió por la web");
+        else {
+          fase = "web: text";
+          const texto = await accion({ accion: "text", args: {} });
+          if (texto.status !== 200 || !String(texto.msg ?? "").includes(marcador)) errores.push(`text web → ${texto.status} ${String(texto.msg ?? "").slice(0, 160)}`);
+          fase = "web: listar sesiones";
+          const lista = await listar();
+          if (lista.status !== 200 || (lista.sesiones ?? []).length !== 1) errores.push(`GET sesiones → ${lista.status} n=${(lista.sesiones ?? []).length}`);
+          fase = "web: cerrar";
+          const cerrada = await accion({ accion: "cerrar", args: { sesion } });
+          if (cerrada.status !== 200) errores.push(`cerrar web → ${cerrada.status} ${String(cerrada.msg ?? "").slice(0, 120)}`);
+          fase = "web: listar tras cerrar";
+          const vacias = await listar();
+          if ((vacias.sesiones ?? []).length !== 0) errores.push("tras cerrar siguen apareciendo sesiones");
+        }
+
+        // 3) Traza: el ask deja id aprobable y el consumo deja el ORIGEN de
+        //    quien gastó la concesión (la web) con la sesión como contexto.
+        fase = "trazas";
+        const ask = fila(ctx.root, "SELECT COUNT(*) c FROM trace_log WHERE tool='browser.abrir' AND decision='ask'");
+        const origenWeb = fila(ctx.root, "SELECT COUNT(*) c FROM trace_log WHERE tool='browser.abrir' AND decision='allow' AND origen='web'");
+        if (!ask?.c) errores.push("sin traza ask de browser.abrir");
+        if (!origenWeb?.c) errores.push("el consumo por la web no deja origen=web en la traza");
+
+        // 4) Módulo apagado → 409 en la web y exit 2 en la CLI (fail closed).
+        //    Se hace YA (con todas las llamadas HTTP seguidas): la consola CLI
+        //    de abajo tarda y no vuelve a tocar la red.
+        fase = "módulo apagado";
+        cli(ctx.root, ["module", "off", "browser"]);
+        const off = await listar();
+        if (off.status !== 409) errores.push(`módulo apagado web → ${off.status} (esperado 409)`);
+        const cliOff = cli(ctx.root, ["browser", "text"]);
+        if (cliOff.code !== 2 || !/deshabilitado/.test(cliOff.out)) errores.push(`CLI con módulo apagado → exit ${cliOff.code}`);
+        cli(ctx.root, ["module", "on", "browser"]); // la consola lo necesita
+
+        // 5) Consola CLI: `abrir` abre y conduce la sesión desde stdin en SU
+        //    propio proceso (la sesión no vive en disco, vive en esta memoria).
+        fase = "consola CLI";
+        let consola = null;
+        for (let i = 0; i < 6 && !consola; i++) {
+          const r = nodo([process.execPath, CLI, "--root", ctx.root, "browser", "abrir", url], { input: "text\nsesiones\ncerrar\n", timeout: 120000 });
+          if (r.code === 0) { consola = r; break; }
+          const id = idAprobable(r.out);
+          if (id) { if (!aprobar(id)) return { ok: false, detalle: `approve ${id} falló (consola)` }; continue; }
+          if (/pestaña|sandbox/i.test(r.out) && !cfg.noSandbox) { optarNoSandbox(); continue; }
+          errores.push(`consola CLI → code=${r.code} ${r.out.slice(0, 160)}`);
+          break;
+        }
+        if (!consola) errores.push("la consola de sesión de la CLI no corrió");
+        else {
+          if (!consola.out.includes(marcador)) errores.push(`consola CLI: text no devolvió la página — salida: ${consola.out.slice(0, 300)}`);
+          if (!/acciones/.test(consola.out)) errores.push("consola CLI: sesiones no listó la sesión viva");
+          if (!/cerrada/.test(consola.out)) errores.push("consola CLI: la sesión no se cerró");
+          const origenCli = fila(ctx.root, "SELECT COUNT(*) c FROM trace_log WHERE tool='browser.abrir' AND decision='allow' AND origen='cli'");
+          if (!origenCli?.c) errores.push("el consumo por la CLI no deja origen=cli en la traza");
+        }
+        const usadas = fila(ctx.root, "SELECT COUNT(*) c FROM aprobaciones WHERE tool='browser.abrir' AND estado='usada'");
+        if (!usadas?.c) errores.push("ninguna concesión quedó como usada (un solo uso)");
+      } catch (e) {
+        errores.push(`excepción en «${fase}»: ${e.message}${e.cause ? ` · causa: ${e.cause.message ?? e.cause}` : ""} · servidor exit=${hijo.exitCode}`);
+      } finally {
+        hijo.kill("SIGTERM");
+        await new Promise((r) => setTimeout(r, 300));
+        if (!hijo.killed) hijo.kill("SIGKILL");
+        // Restaura el interruptor ANTES de cerrar (la CLI falla cerrado con el
+        // módulo apagado) y luego devuelve el proyecto a como estaba.
+        cli(ctx.root, ["module", "on", "browser"]);
+        cli(ctx.root, ["browser", "cerrar"]);
+        cli(ctx.root, ["module", moduloPrevia ? "on" : "off", "browser"]);
+        if (polPrev) writeFileSync(polPath, polPrev);
+        else { try { rmSync(polPath); } catch { /* no existía */ } }
+        if (cfgPrev) writeFileSync(cfgPath, cfgPrev);
+        else { try { rmSync(cfgPath); } catch { /* no existía */ } }
+        pagina.kill("SIGTERM");
+      }
+      return {
+        ok: errores.length === 0,
+        detalle: errores.length
+          ? errores.join(" · ")
+          : "web y consola CLI con aprobación única · texto leído · trazas con origen web+cli · módulo apagado 409/exit 2",
+      };
+    },
+  },
+  {
     // ADR-0003 (grupo añadido): trayectoria REAL de un run con `--agente` —
     // llamadas al LLM, tokens y latencia por run. Requiere proveedor configurado
     // en adapters.config.json del repo; sin él el caso se omite justificado.

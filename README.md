@@ -84,6 +84,7 @@ El estado de cada módulo se deriva de los exports de su entrada, no de una list
 | `kanban` | 0.1.0 | Tablero de tareas por estado (SQLite `tasks` agrupadas en columnas) | lista |
 | `speckit` | 0.1.0 | Convergencia SDD: specs ↔ tasks ↔ evidencias pass | lista |
 | `telegram` | 0.3.0 | Canal Telegram: notificaciones y aprobaciones (broker decide) | — |
+| `browser` | 0.1.0 | Motor headless: captura PNG/DOM como evidencia + sesiones conducibles por CDP (`abrir`/`nav`/`clic`/`escribir`/`leerTexto`/`capturar`) | lista |
 
 ### Adapters (proveedor LLM)
 
@@ -178,6 +179,24 @@ axiom telegram bloqueos
 axiom telegram consumo
 ```
 
+### Browser (sesiones conducibles)
+
+```bash
+axiom module on browser
+axiom browser <url> [--dom]     # captura puntual (evidencia, no cambia)
+axiom browser sesiones
+axiom browser abrir <url>       # abre la sesión y queda en consola de sesión
+browser> nav <url>
+browser> clic --selector "#guardar"
+browser> type --selector "#nombre" --texto hola
+browser> wait 500
+browser> text [--selector "#out"]
+browser> shot
+browser> sesiones | cerrar | exit
+```
+
+La sesión vive en la **memoria del proceso que la abre** (sin espejo en disco): `abrir` se queda en una consola que lee las mismas acciones de stdin hasta `cerrar`/`exit`/EOF y, al salir, cierra la sesión sola para no dejar un navegador huérfano. Toda acción pasa por el broker con su traza y su origen —`abrir`/`nav` son riesgo alto y siempre piden aprobación humana por uso— y consume el presupuesto de la sesión (30 acciones / 10 min por defecto, `browser.config.json → sesiones`, con allowlist de dominios opcional). La web conduce la misma sesión entre peticiones vía `POST /api/browser/accion`; sin motor o con el módulo apagado todo falla cerrado (exit 2 / 409).
+
 ## Web (interfaz completa)
 
 ```bash
@@ -217,6 +236,8 @@ La web no es una consola más: es el panel de control del harness. Incluye chat 
 | `/api/chat/enviar` | POST | Mensaje de chat (el LLM responde) |
 | `/api/plan/aprobar` | POST | Aprueba/rechaza propuesta |
 | `/api/staging` | GET | Archivos fuera de allowlist |
+| `/api/browser/sesiones` | GET | Sesiones de navegador vivas (409 con el módulo apagado) |
+| `/api/browser/accion` | POST | Acción de sesión (`abrir`/`nav`/`clic`/…) decidida en el broker |
 
 La spec completa vive en [`openapi.json`](openapi.json); `axiom validate-openapi` comprueba que el spec y el router (`web.ts`) no se desincronicen.
 
@@ -240,6 +261,12 @@ Falla cerrado en cada paso: sin proveedor no genera, sin validación no persiste
 ```
 
 La web solo muestra presencia ("guardada" / "ausente"); los valores nunca se reenvían al cliente.
+En **Ajustes → Proveedor LLM** esa presencia se ve junto al proveedor elegido: si necesita una clave
+que el servidor no tiene, el panel lo avisa apenas se abre la vista —no hace falta pulsar «Cargar modelos»
+ni guardar antes— y dice qué clave falta y que el harness falla cerrado hasta guardarla.
+Al lado está **Probar conexión**: hace una llamada mínima al proveedor del formulario (sin guardarlo, con
+`maxChars` corto para no inundar el panel) y enseña la respuesta o el error real del proveedor tal cual
+(por ejemplo el 401 de una clave revocada), en vez de un «no hay modelos» que no explica nada.
 
 ## Políticas y techo (broker)
 

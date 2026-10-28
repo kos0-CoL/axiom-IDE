@@ -23,17 +23,22 @@ export function renderOrquestacion(root: string): string {
   return out.join("\n");
 }
 
-export interface AprobacionView { id: string; tool: string; riesgo: string; estado: string; created_at: string; decided_by: string; decided_at: string; agente: string }
+// `usada_at`/`usada_por`: una concesión autoriza un solo uso, así que la vista
+// debe poder decir cuándo se consumió y qué corrida la gastó (si no, `usada` es
+// un estado opaco).
+export interface AprobacionView { id: string; tool: string; riesgo: string; estado: string; created_at: string; decided_by: string; decided_at: string; agente: string; usada_at: string; usada_por: string }
 
 // JSON para la web: mismas consultas que el texto (criterio UI-SPEC 5: sin divergencia).
 export interface UsoView { prompt: number; respuesta: number; total: number; fuente: string; created_at: string }
 export function datosOrquestacion(root: string): { techo: { rondas: number; tokens: number; calls: number }; consumo: { tokens: number; calls: number }; usos: UsoView[]; tareas: { estado: string; n: number }[]; aprobaciones: AprobacionView[] } {
   const db = openDb(root);
   const tasks = db.prepare("SELECT estado, COUNT(*) c FROM tasks GROUP BY estado").all() as any[];
-  // `agente` identifica a quién se le pidió la herramienta; en bases anteriores
-  // a esa columna se degrada a la consulta sin ella en vez de perder las filas.
+  // `agente` identifica a quién se le pidió la herramienta y `usada_at`/`usada_por`
+  // por qué una concesión ya no sirve; en bases anteriores a esas columnas se
+  // degrada a la consulta sin ellas en vez de perder las filas.
   let aprob: any[] = [];
   for (const sql of [
+    "SELECT id, tool, riesgo, estado, created_at, decided_by, decided_at, agente, usada_at, usada_por FROM aprobaciones ORDER BY created_at DESC LIMIT 20",
     "SELECT id, tool, riesgo, estado, created_at, decided_by, decided_at, agente FROM aprobaciones ORDER BY created_at DESC LIMIT 20",
     "SELECT id, tool, riesgo, estado, created_at FROM aprobaciones ORDER BY created_at DESC LIMIT 20",
   ]) {
@@ -46,7 +51,7 @@ export function datosOrquestacion(root: string): { techo: { rondas: number; toke
   return {
     techo: global.techo, consumo, usos,
     tareas: tasks.map((t) => ({ estado: t.estado, n: t.c })),
-    aprobaciones: aprob.map((a) => ({ id: a.id, tool: a.tool, riesgo: a.riesgo, estado: a.estado, created_at: a.created_at ?? "", decided_by: a.decided_by ?? "", decided_at: a.decided_at ?? "", agente: a.agente ?? "" })),
+    aprobaciones: aprob.map((a) => ({ id: a.id, tool: a.tool, riesgo: a.riesgo, estado: a.estado, created_at: a.created_at ?? "", decided_by: a.decided_by ?? "", decided_at: a.decided_at ?? "", agente: a.agente ?? "", usada_at: a.usada_at ?? "", usada_por: a.usada_por ?? "" })),
   };
 }
 

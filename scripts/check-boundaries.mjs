@@ -33,8 +33,8 @@ const rules = {
   "store.ts": [],
   "chat-build.ts": ["./store.js", "./sessions.js"],
   "contracts.ts": [],
-  "cli.ts": ["./commands.js", "./telegram.js", "./adapters.js", "./agents.js", "./secrets.js", "./sandbox.js", "./modulos.js", "./skills.js"],
-  "commands.ts": ["./store.js", "./contracts.js", "./preset.js", "./broker.js", "./policy.js", "./ui.js", "./components.js", "./sandbox.js", "./web.js", "./runmark.js", "./staging.js", "./adapters.js", "./experience.js", "./modulos.js", "./modules/agents/index.js", "./modules/browser/index.js"],
+  "cli.ts": ["./commands.js", "./telegram.js", "./adapters.js", "./agents.js", "./secrets.js", "./sandbox.js", "./modulos.js", "./skills.js", "./modules/browser/sesion.js"],
+  "commands.ts": ["./store.js", "./contracts.js", "./preset.js", "./broker.js", "./policy.js", "./ui.js", "./components.js", "./sandbox.js", "./web.js", "./runmark.js", "./staging.js", "./adapters.js", "./experience.js", "./modulos.js", "./modules/agents/index.js", "./modules/browser/index.js", "./modules/browser/sesion.js"],
 };
 let errors = 0;
 for (const f of readdirSync(root).filter((x) => x.endsWith(".ts"))) {

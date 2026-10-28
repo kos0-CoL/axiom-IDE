@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { spawnOpenAICompat } from "../dist/modules/adapters/openai_compat.js";
+import { spawnOpenAICompat, fetchOpenRouterModels } from "../dist/modules/adapters/openai_compat.js";
 
 function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{ server: Server; base: string }> {
   return new Promise((resolve, reject) => {
@@ -26,6 +26,22 @@ test("HTTP 200 con cuerpo no-JSON se reporta como sin JSON, no como timeout", as
     assert.equal(r.ok, false);
     assert.match(r.error ?? "", /sin JSON/);
     assert.doesNotMatch(r.error ?? "", /timeout/);
+  } finally {
+    await new Promise((resolve) => server.close(() => resolve(undefined)));
+  }
+});
+
+test("el catálogo live vuelve entero: 350 modelos no se recortan a 300", async () => {
+  const data = Array.from({ length: 350 }, (_, i) => ({ id: `proveedor/modelo-${i}`, pricing: { prompt: "0.000001" } }));
+  const { server, base } = await listen((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ data }));
+  });
+  try {
+    const r = await fetchOpenRouterModels(base, "sk-or-v1-test");
+    assert.equal(r.ok, true);
+    assert.equal(r.modelos?.length, 350, "un recorte esconde modelos que la lista del proveedor sí tiene");
+    assert.equal(r.modelos?.[349]?.id, "proveedor/modelo-349");
   } finally {
     await new Promise((resolve) => server.close(() => resolve(undefined)));
   }

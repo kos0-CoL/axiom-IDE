@@ -1,6 +1,6 @@
 // Módulo adapters — una sola integración activa (AXM-062).
 // Cambiar de proveedor es solo config: `adapters use ollama|litellm|off`.
-import { AdaptersConfig, baseUrlDe, loadConfig, MODELOS, Proveedor, saveConfig } from "./config.js";
+import { AdaptersConfig, baseUrlDe, defaultBaseUrl, loadConfig, MODELOS, Proveedor, saveConfig } from "./config.js";
 import { openDb } from "../../store.js";
 import { getConsumo } from "../../store.js";
 import { spawnOllama, SpawnResult } from "./ollama.js";
@@ -66,6 +66,24 @@ export function modelosPara(proveedor: string, filtro: "todos" | "free" | "recom
   return lista;
 }
 
+// Filtra el catálogo vivo del proveedor. «recomendados» = los ids curados que
+// siguen vivos; si el proveedor retiró todos (pasa: el catálogo rota) devuelve el
+// catálogo entero, porque un desplegable vacío no distingue «no hay curados» de
+// «la key no se tomó». Exportada para los tests: el filtro es contrato de la vista.
+export function filtrarModelosLive(
+  modelos: { id: string; free?: boolean }[],
+  filtro: "todos" | "free" | "recomendados",
+  curados: string[],
+): { id: string; free?: boolean; recomendado?: boolean }[] {
+  if (filtro === "free") return modelos.filter((m) => m.free);
+  if (filtro === "recomendados") {
+    const ids = new Set(curados);
+    const vivos = modelos.filter((m) => ids.has(m.id)).map((m) => ({ ...m, recomendado: true }));
+    return vivos.length ? vivos : modelos;
+  }
+  return modelos;
+}
+
 export async function modelosOpenRouter(root: string, filtro: "todos" | "free" | "recomendados" = "todos"): Promise<{ ok: boolean; modelos?: { id: string; free?: boolean; recomendado?: boolean }[]; error?: string }> {
   const r = loadConfig(root);
   if (!r.ok) return { ok: false, error: r.error };
@@ -75,12 +93,8 @@ export async function modelosOpenRouter(root: string, filtro: "todos" | "free" |
   const live = await fetchOpenRouterModels(baseUrlDe({ ...r.config, proveedor: "openrouter" }), key);
   if (!live.ok) return live;
   const lista = live.modelos ?? [];
-  if (filtro === "free") return { ok: true, modelos: lista.filter((m) => m.free) };
-  if (filtro === "recomendados") {
-    const ids = new Set(modelosPara("openrouter", "recomendados").map((m) => m.id));
-    return { ok: true, modelos: lista.filter((m) => ids.has(m.id)).map((m) => ({ ...m, recomendado: true })) };
-  }
-  return { ok: true, modelos: lista };
+  const curados = modelosPara("openrouter", "recomendados").map((m) => m.id);
+  return { ok: true, modelos: filtrarModelosLive(lista, filtro, curados) };
 }
 
 export function usarProveedor(root: string, p?: string): string {
@@ -144,11 +158,16 @@ export function ponerMaxChars(root: string, n?: string): string {
 export async function spawn(
   root: string,
   task: string,
-  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; onDelta?: (texto: string) => void } = {},
+  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; proveedor?: Proveedor; baseUrl?: string; onDelta?: (texto: string) => void } = {},
 ): Promise<SpawnResult> {
   const r = loadConfig(root);
   if (!r.ok) return { ok: false, error: `config inválida (fail closed): ${r.error}`, ms: 0, proveedor: "?", model: "?" };
   const c = r.config;
+  // `proveedor`/`baseUrl` viajan en el override para poder probar la conexión del
+  // proveedor que está en el formulario sin guardarlo antes (guardar algo que
+  // todavía no funciona rompería el chat en marcha). Si el proveedor probado es
+  // otro que el guardado, la base guardada no aplica —es de aquel— y se usa la
+  // del proveedor, salvo que el override traiga una explícita.
   const budget = {
     timeoutMs: override.timeoutMs ?? c.timeoutMs,
     maxChars: override.maxChars ?? c.maxChars,
@@ -157,18 +176,22 @@ export async function spawn(
   // silencioso al global cuando el modelo pedido falla: el proveedor responde y
   // su error se propaga tal cual (se ve qué agente y qué modelo lo causaron).
   const modelo = typeof override.model === "string" && override.model.trim() ? override.model.trim() : c.model;
-  if (c.proveedor === "off") {
+  const prov: Proveedor = override.proveedor ?? c.proveedor;
+  const cfg: AdaptersConfig = prov === c.proveedor
+    ? { ...c, baseUrl: override.baseUrl ?? c.baseUrl }
+    : { ...c, proveedor: prov, baseUrl: override.baseUrl ?? defaultBaseUrl(prov) };
+  if (prov === "off") {
     return { ok: false, error: "apagado (fail closed): elige un proveedor en Configuración", ms: 0, proveedor: "off", model: modelo };
   }
-  if (c.proveedor === "ollama") return spawnOllama(baseUrlDe(c), modelo, task, budget);
-  if (c.proveedor === "anthropic") {
+  if (prov === "ollama") return spawnOllama(baseUrlDe(cfg), modelo, task, budget);
+  if (prov === "anthropic") {
     const key = override.key ?? keyPara("anthropic", root);
     if (!key) return { ok: false, error: "sin key (fail closed): guarda ANTHROPIC_API_KEY en Configuración", ms: 0, proveedor: "anthropic", model: modelo };
     const t0 = Date.now();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), budget.timeoutMs);
     try {
-      const r = await fetch(`${baseUrlDe(c).replace(/\/$/, "")}/v1/messages`, {
+      const r = await fetch(`${baseUrlDe(cfg).replace(/\/$/, "")}/v1/messages`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: modelo, max_tokens: Math.min(c.maxChars, 4096), messages: [{ role: "user", content: task }] }),
@@ -192,14 +215,14 @@ export async function spawn(
       clearTimeout(timer);
     }
   }
-  if (c.proveedor === "google") {
+  if (prov === "google") {
     const key = override.key ?? keyPara("google", root);
     if (!key) return { ok: false, error: "sin key (fail closed): guarda GOOGLE_API_KEY en Configuración", ms: 0, proveedor: "google", model: modelo };
     const t0 = Date.now();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), budget.timeoutMs);
     try {
-      const r = await fetch(`${baseUrlDe(c).replace(/\/$/, "")}/v1beta/models/${encodeURIComponent(modelo)}:generateContent?key=${encodeURIComponent(key)}`, {
+      const r = await fetch(`${baseUrlDe(cfg).replace(/\/$/, "")}/v1beta/models/${encodeURIComponent(modelo)}:generateContent?key=${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: task }] }] }),
@@ -224,17 +247,17 @@ export async function spawn(
       clearTimeout(timer);
     }
   }
-  const keyName = c.proveedor === "litellm" ? "AXIOM_LITELLM_KEY" : c.proveedor === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY";
-  const key = override.key ?? keyPara(c.proveedor, root);
+  const keyName = prov === "litellm" ? "AXIOM_LITELLM_KEY" : prov === "openai" ? "OPENAI_API_KEY" : "OPENROUTER_API_KEY";
+  const key = override.key ?? keyPara(prov, root);
   if (!key) {
-    return { ok: false, error: `sin key (fail closed): guarda ${keyName} en Configuración`, ms: 0, proveedor: c.proveedor, model: modelo };
+    return { ok: false, error: `sin key (fail closed): guarda ${keyName} en Configuración`, ms: 0, proveedor: prov, model: modelo };
   }
-  if (c.proveedor === "openrouter" && !formatoOpenRouter(key)) {
-    return { ok: false, error: errorKeyOpenRouter(key), ms: 0, proveedor: c.proveedor, model: modelo };
+  if (prov === "openrouter" && !formatoOpenRouter(key)) {
+    return { ok: false, error: errorKeyOpenRouter(key), ms: 0, proveedor: prov, model: modelo };
   }
-  if (c.proveedor === "litellm") return spawnLiteLLM(baseUrlDe(c), modelo, task, key, budget);
-  const extra: Record<string, string> = c.proveedor === "openrouter" ? { "HTTP-Referer": "http://127.0.0.1/", "X-Title": "Axiom" } : {};
-  const s = await spawnOpenAICompat(c.proveedor, baseUrlDe(c), modelo, task, key, budget, extra, override.onDelta);
+  if (prov === "litellm") return spawnLiteLLM(baseUrlDe(cfg), modelo, task, key, budget);
+  const extra: Record<string, string> = prov === "openrouter" ? { "HTTP-Referer": "http://127.0.0.1/", "X-Title": "Axiom" } : {};
+  const s = await spawnOpenAICompat(prov, baseUrlDe(cfg), modelo, task, key, budget, extra, override.onDelta);
   // Key bien formada pero rechazada (revocada/de otra cuenta): el 401 de
   // OpenRouter llega sin pista; se lo explicamos en el propio error.
   if (!s.ok && s.error && /Missing Authentication header/i.test(s.error)) s.error += " — OpenRouter no reconoce esta key: crea una sk-or-v1-… en openrouter.ai/keys y guárdala en Configuración";

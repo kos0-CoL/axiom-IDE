@@ -70,14 +70,18 @@
       "ok": true,
       "ms": 1636
     },
+    "browser-tool": {
+      "ok": true,
+      "ms": 4338
+    },
     "trayectoria-run": {
       "ok": true,
       "ms": 31765
     }
   },
   "resumen": {
-    "total": 18,
-    "ok": 18,
+    "total": 19,
+    "ok": 19,
     "omitidos": 0
   }
 }

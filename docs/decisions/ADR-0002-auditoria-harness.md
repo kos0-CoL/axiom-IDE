@@ -23,7 +23,7 @@ contra ese checklist para decidir qué integrar y en qué orden, sin reescribir 
 | Evaluación (evals) | ⚠️ | Skill `evaluacion` existe como instrucción, pero no hay suite de evals ni línea base ejecutable del harness |
 | Observabilidad / tracing | ✅ | Cada tool call deja traza en `trace_log` (decisión + IO resumido con sha256 del completo) desde `broker.check()`; `axiom status --trace` la consulta por tarea y global (ADR-0004; el export OTel/Langfuse sigue opcional según E5) |
 | Memoria entre sesiones | ✅ | Estrategia por capas escrita y operativa (ADR-0005): auditoría intocable, retención automática en logs, `axiom memory [estado|compact --dry-run]` para EXPERIENCE.md y sesiones archivadas — olvido solo explícito y anotado |
-| Browser como tool | ❌ | No hay módulo de navegador: el agente no puede verificar UI ni navegar URLs (gap de verificación, no solo features) |
+| Browser como tool | ✅ | Módulo `browser` con sesiones conducibles por CDP (`navegar`/`clic`/`escribir`/`leerTexto`… decididas en el broker con traza, límites por sesión y captura como evidencia) desde ADR-0006; la captura de `verify --url` ya existía |
 | Seguridad ofensiva/defensiva | ❌ | Solo el skill `seguridad` (revisión estática); sin skills de dominio (threat modeling, hardening, auditar dependencias) |
 | Diagramas como artefacto | ⚠️ | Módulo `grafos` compara intended vs executed, pero no genera diagramas de arquitectura/flujo revisables |
 

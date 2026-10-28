@@ -87,7 +87,7 @@ necesarias en un harness de código de producción, no una lista de deseos.
 | Implementación acotada | `implementador` con `editar=ask` | — | — |
 | Verificación con evidencia | `verificador` + `verify`/`testing`/`evidence` | Ejecución real de la suite en el grafo (hoy es CLI) | Alta |
 | Revisión independiente del diff | `revisor` (solo lectura) | Revisar archivos inesperados y desviaciones de spec en cada corrida | Media |
-| Seguridad | `revisor-seguridad` (`policy`, `sandbox`, `seguridad`) | Controles deterministas (escaneo de secretos, dependencias) conectados al broker | Alta |
+| Seguridad | `revisor-seguridad` (`policy`, `sandbox`, `seguridad`, `sec-*`) | Controles deterministas (escaneo de secretos, dependencias) conectados al broker | Alta |
 | Datos y esquema | `especialista-datos` (`datos-esquema`) | Ejecución local de migraciones y verificación en el grafo | Alta si hay datos |
 | Rendimiento | `rendimiento` (oleada 2) | Línea base automatizada por tarea | Media |
 | Accesibilidad | `accesibilidad` (oleada 2) | Pruebas de UI automatizadas | Media (si hay UI) |
@@ -124,7 +124,7 @@ propuesta.
 | `implementador` | nodo | `implementar`, `minimal-diff` | `leer=allow`, `editar=ask`, `ejecutar=ask` | Único que escribe código |
 | `verificador` | nodo | `verify`, `testing`, `evidence` | `leer=allow`, `ejecutar=ask` | Corre la suite y deja evidencia |
 | `revisor` | nodo | `review`, `evidence` | `leer=allow` | Revisión de solo lectura, independiente del implementador |
-| `revisor-seguridad` | especializado | `policy`, `sandbox`, `seguridad` | `leer=allow`, `buscar=ask` | Secretos, permisos, dependencias, CI |
+| `revisor-seguridad` | especializado | `policy`, `sandbox`, `seguridad`, `sec-threat-model`, `sec-cve`, `sec-hardening`, `sec-injection`, `sec-auth`, `sec-net` | `leer=allow`, `buscar=ask` | Secretos, permisos, dependencias, CI, threat model, CVEs, hardening, inyección, auth, red |
 | `documentador` | especializado | `docs`, `minimal-diff` | `leer=allow`, `editar=ask` | Docs que no derivan del comportamiento |
 | `especialista-datos` | especializado | `datos-esquema`, `verify` | `leer=allow`, `ejecutar=ask` | Migraciones con rollback, solo si hay esquema |
 

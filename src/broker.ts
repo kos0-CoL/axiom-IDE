@@ -48,10 +48,12 @@ function componer(base: Veredicto, agente?: DeclaracionAgente): Veredicto {
 
 // Tabla de aprobaciones: `agente` recuerda quién pidió la herramienta para
 // revalidar su declaración al decidir. `usada_at` marca cuándo se consumió una
-// aprobación concedida (autoriza un solo uso). ALTER best-effort para bases ya creadas.
+// aprobación concedida (autoriza un solo uso) y `usada_por` qué corrida la gastó:
+// sin ese dato, «usada» en la vista es un estado sin explicación.
+// ALTER best-effort para bases ya creadas.
 function prepararTabla(db: ReturnType<typeof openDb>): void {
-  db.exec("CREATE TABLE IF NOT EXISTS aprobaciones(id TEXT PRIMARY KEY, tool TEXT, riesgo TEXT, estado TEXT, created_at TEXT, decided_by TEXT, decided_at TEXT, agente TEXT, usada_at TEXT)");
-  for (const col of ["decided_by TEXT", "decided_at TEXT", "agente TEXT", "usada_at TEXT"]) {
+  db.exec("CREATE TABLE IF NOT EXISTS aprobaciones(id TEXT PRIMARY KEY, tool TEXT, riesgo TEXT, estado TEXT, created_at TEXT, decided_by TEXT, decided_at TEXT, agente TEXT, usada_at TEXT, usada_por TEXT)");
+  for (const col of ["decided_by TEXT", "decided_at TEXT", "agente TEXT", "usada_at TEXT", "usada_por TEXT"]) {
     try { db.exec(`ALTER TABLE aprobaciones ADD COLUMN ${col}`); } catch { /* ya existe */ }
   }
 }
@@ -62,9 +64,11 @@ const VIGENCIA_MIN = 30;
 
 // Consume una aprobación ya concedida para (tool, agente): autoriza UN uso. El
 // runner la toma antes de ejecutar; sin esto, aprobar no desbloquearía nada,
-// porque cada check abre una solicitud nueva. Devuelve la aprobación consumida o
-// undefined (no había, la tomó otro proceso o está fuera de vigencia).
-export function consumirAprobacion(root: string, tool: string, agente: string): { id: string } | undefined {
+// porque cada check abre una solicitud nueva. `por` deja escrito qué corrida la
+// gastó, que es lo que la vista necesita para explicar el estado `usada`.
+// Devuelve la aprobación consumida o undefined (no había, la tomó otro proceso o
+// está fuera de vigencia).
+export function consumirAprobacion(root: string, tool: string, agente: string, por = ""): { id: string } | undefined {
   const db = openDb(root);
   try {
     prepararTabla(db);
@@ -74,16 +78,16 @@ export function consumirAprobacion(root: string, tool: string, agente: string): 
       .get(tool, agente, desde) as { id?: string } | undefined;
     if (!row?.id) return undefined;
     // CAS sobre el estado: si dos procesos compiten, solo uno la consume.
-    const marca = db.prepare("UPDATE aprobaciones SET estado='usada', usada_at=? WHERE id=? AND estado='aprobada'").run(new Date().toISOString(), row.id);
+    const marca = db.prepare("UPDATE aprobaciones SET estado='usada', usada_at=?, usada_por=? WHERE id=? AND estado='aprobada'").run(new Date().toISOString(), por, row.id);
     const consumida = Number(marca.changes ?? 0) > 0;
     // Traza del uso real (AXM-066): la aprobación consumida ES la tool call
     // autorizada; sin esta fila, `status --trace` vería la solicitud pero no el uso.
     if (consumida) {
       recordTraza(root, {
-        origen: "run", tool, decision: "allow",
-        motivo: `aprobación ${row.id} consumida por ${tool}`,
-        approvalId: row.id, entrada: { tool }, salida: { consumida: true },
-        contexto: "", ok: true,
+        origen: "run", tool, agente, decision: "allow",
+        motivo: `aprobación ${row.id} consumida por ${agente}:${tool}`,
+        approvalId: row.id, entrada: { tool, agente, por }, salida: { consumida: true },
+        contexto: por, ok: true,
       });
     }
     return consumida ? { id: row.id } : undefined;
@@ -94,7 +98,38 @@ export function consumirAprobacion(root: string, tool: string, agente: string): 
   }
 }
 
-// Qué herramienta (y qué agente, si lo hubo) originó una aprobación.
+// Consume una aprobación ya concedida SIN agente en la fila: es el espejo de
+// consumirAprobacion para tool calls manuales (CLI o web, p. ej. las acciones
+// del módulo browser, ADR-0006) — filas con agente NULL. Mismo CAS de un solo
+// uso y misma ventana de vigencia que la del runner. El texto de la traza deja
+// escrito qué uso la gastó (AXM-066).
+export function consumirAprobacionManual(root: string, tool: string, contexto = "", origen = "cli"): { id: string } | undefined {
+  const db = openDb(root);
+  try {
+    prepararTabla(db);
+    const desde = new Date(Date.now() - VIGENCIA_MIN * 60000).toISOString();
+    const row = db
+      .prepare("SELECT id FROM aprobaciones WHERE tool=? AND agente IS NULL AND estado='aprobada' AND decided_at>=? ORDER BY decided_at ASC LIMIT 1")
+      .get(tool, desde) as { id?: string } | undefined;
+    if (!row?.id) return undefined;
+    const marca = db.prepare("UPDATE aprobaciones SET estado='usada', usada_at=?, usada_por=? WHERE id=? AND estado='aprobada'").run(new Date().toISOString(), contexto, row.id);
+    const consumida = Number(marca.changes ?? 0) > 0;
+    if (consumida) {
+      recordTraza(root, {
+        origen, tool, agente: "", decision: "allow",
+        motivo: `aprobación manual ${row.id} usada en «${tool}»${contexto ? ` (${contexto})` : ""}`,
+        approvalId: row.id, entrada: { tool, contexto }, salida: { consumida: true },
+        contexto, ok: true,
+      });
+    }
+    return consumida ? { id: row.id } : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    db.close();
+  }
+}
+
 export function datosAprobacion(root: string, id: string): { tool: string; agente?: string } | undefined {
   const db = openDb(root);
   try {

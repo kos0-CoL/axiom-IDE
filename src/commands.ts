@@ -23,6 +23,7 @@ import { startWeb, validateTokens, defaultWebSource } from "./web.js";
 import { spawn as adaptersSpawn, formatSpawn } from "./adapters.js";
 import { rondaAgenteGrafo, declaracionDeHerramienta, declaracionDeAprobacion } from "./modules/agents/index.js";
 import { capturar } from "./modules/browser/index.js";
+import { ejecutar, listarSesiones, esAccion, type RespuestaAccion, type TipoAccion } from "./modules/browser/sesion.js";
 
 export function activeDir(root: string, id: string): string {
   return join(root, "specs", "active", id);
@@ -709,6 +710,32 @@ export function cmdValidateTokens(file?: string): void {
   const r = validateTokens(f as string);
   if (!r.ok) { for (const e of r.errores) console.error(`INVALID ${e}`); process.exit(1); }
   console.log(`validate-tokens OK: ${f}`);
+}
+
+// Fachadas de las sesiones de navegador (ADR-0006): la CLI y la web (y cualquier
+// caller) pasan por aquí para que validación, broker.check y límites sean únicos.
+export function browserSesiones(): { sesiones: ReturnType<typeof listarSesiones> } {
+  return { sesiones: listarSesiones() };
+}
+
+// Valida la acción que manda la web sin que web.ts importe el módulo: la lista
+// vive en sesion.ts (claves de los contratos) y aquí solo se expone el guard.
+export function esAccionBrowser(x: unknown): x is TipoAccion {
+  return esAccion(x);
+}
+
+export async function browserAccion(
+  root: string,
+  accion: TipoAccion,
+  args: Record<string, unknown>,
+  origen = "cli",
+): Promise<RespuestaAccion> {
+  const sesion = typeof args.sesion === "string" && args.sesion.trim() ? args.sesion.trim() : undefined;
+  return ejecutar(root, accion, args, {
+    origen,
+    entrada: { accion, ...(sesion ? { sesion } : {}) },
+    contexto: sesion ? `sesion ${sesion}` : `browser ${accion}`,
+  });
 }
 
 export function cmdCycle(root: string, key?: string): void {

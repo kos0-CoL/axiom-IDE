@@ -8,6 +8,9 @@ const tgToken = (root: string): string | undefined => getSecret(root, "AXIOM_TEL
 import { agentsText, addAgente, pausarAgente, skill as agentSkill, enlazar as agentLink, definirAgente, handoff as agentHandoff, textoHandoffs } from "./agents.js";
 import { configText as adaptersConfig, usarProveedor, ponerModelo, ponerUrl, ponerTimeoutMs, ponerMaxChars, spawn as adaptersSpawn, formatSpawn } from "./adapters.js";
 import { sandboxRun, sandboxSpec } from "./sandbox.js";
+import { browserSesiones, browserAccion } from "./commands.js";
+import type { TipoAccion } from "./modules/browser/sesion.js";
+import { createInterface } from "node:readline";
 import { listarModulos, moduloActivo, setModulo, setVista, textoModulos, textoSuperficie } from "./modulos.js";
 import { textoSkills, leerSkill, borrarSkill } from "./skills.js";
 void listarModulos;
@@ -19,6 +22,75 @@ const args = rootIdx >= 0 ? rawArgs.filter((_, i) => i !== rootIdx && i !== root
 
 const [cmd, ...rest] = args;
 if ((cmd === "telegram" || cmd === "adapters") && !moduloActivo(root, cmd)) { console.error(`módulo ${cmd} deshabilitado (fail closed): habilítalo con \`axiom module on ${cmd}\``); process.exit(2); }
+
+// --- Sesiones de navegador (ADR-0006): argumentos compartidos entre una
+// invocación suelta y la consola de sesión. Banderas `--flag valor` y tokens
+// sueltos: url (abrir), id de sesión (nav|cerrar), selector (click|text|wait),
+// texto (type) o ms (wait con un número).
+function argsBrowser(accion: string, resto: string[]): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  const sinFlag: string[] = [];
+  for (let i = 0; i < resto.length; i++) {
+    if (!resto[i].startsWith("--")) { sinFlag.push(resto[i]); continue; }
+    const clave = resto[i].slice(2);
+    const valor = resto[i + 1];
+    if (valor === undefined) { console.error(`uso: axiom browser ${accion} --${clave} <valor>`); process.exit(2); }
+    args[clave] = clave === "ms" ? Number(valor) : valor;
+    i++;
+  }
+  const primero = sinFlag[0];
+  const selector = (): boolean => args.selector === undefined && args.css === undefined;
+  if (accion === "abrir") {
+    if (primero && args.url === undefined) args.url = primero;
+    if (sinFlag[1] && args.sesion === undefined) args.sesion = sinFlag[1];
+  } else if (accion === "nav" || accion === "cerrar") {
+    if (primero && args.sesion === undefined) args.sesion = primero;
+  } else if (accion === "click" || accion === "text") {
+    if (primero && selector()) args.selector = primero;
+  } else if (accion === "wait") {
+    if (args.ms === undefined && primero && /^\d+$/.test(primero)) args.ms = Number(primero);
+    else if (primero && selector() && args.url === undefined) args.selector = primero;
+  } else if (accion === "type") {
+    if (sinFlag.length >= 2 && selector()) args.selector = sinFlag[0];
+    if (args.texto === undefined && sinFlag.length) args.texto = sinFlag[sinFlag.length - 1];
+  }
+  return args;
+}
+
+// La sesión vive en la memoria de ESTE proceso (ADR-0006: fuente de verdad sin
+// espejo en disco), así que `abrir` se queda conduciéndola: lee las mismas
+// acciones desde stdin —interactivo o pipe— hasta `cerrar`/`exit` o EOF, y al
+// salir la cierra para no dejar un navegador huérfano corriendo.
+async function consolaSesion(rootCli: string, sesion: string): Promise<void> {
+  const conPrompt = Boolean(process.stdin.isTTY);
+  const rl = createInterface({ input: process.stdin, ...(conPrompt ? { output: process.stdout, prompt: "browser> " } : {}) });
+  console.log(`consola de la sesión ${sesion}: nav|click|type|wait|text|shot|sesiones|cerrar|exit — vive en este proceso`);
+  let cerrada = false;
+  if (conPrompt) rl.prompt();
+  for await (const linea of rl) {
+    const partes = String(linea).trim().split(/\s+/).filter(Boolean);
+    const accion = partes[0];
+    if (!accion) { if (conPrompt) rl.prompt(); continue; }
+    if (accion === "exit" || accion === "quit") break;
+    if (accion === "sesiones") {
+      const { sesiones } = browserSesiones();
+      if (sesiones.length === 0) console.log("browser: sin sesiones abiertas (abre una con `axiom browser abrir <url>`)");
+      else for (const s of sesiones) console.log(`${s.id} · ${s.url} · ${s.motor} · ${s.acciones} acciones · creada ${s.creada}`);
+    } else if (accion === "cerrar" || accion === "nav" || accion === "click" || accion === "type" || accion === "wait" || accion === "text" || accion === "shot") {
+      const r = await browserAccion(rootCli, accion as TipoAccion, argsBrowser(accion, partes.slice(1)), "cli");
+      console.log(r.msg);
+      if (accion === "cerrar") { cerrada = true; break; }
+    } else {
+      console.error(`acción desconocida: ${accion} (nav|click|type|wait|text|shot|sesiones|cerrar|exit)`);
+    }
+    if (conPrompt) rl.prompt();
+  }
+  rl.close();
+  if (!cerrada) {
+    const r = await browserAccion(rootCli, "cerrar", { sesion }, "cli");
+    console.log(r.ok ? `stdin terminó: ${r.msg}` : `la sesión ${sesion} ya no estaba`);
+  }
+}
 if (cmd === "module" && rest[0] === "list") console.log(textoModulos(root));
 else if (cmd === "module" && (rest[0] === "on" || rest[0] === "off")) { const m = setModulo(root, rest[1], rest[0]); console.log(m); if (/uso: axiom|inválido|desconocido/.test(m)) process.exit(2); }
 else if (cmd === "module" && rest[0] === "new") cmdModuloCrear(root, rest[1], rest[2], rest.slice(3).join(" ") || undefined);
@@ -60,13 +132,34 @@ else if (cmd === "grafos" && rest[0] === "ver") {
 else if (cmd === "browser") {
   if (!moduloActivo(root, "browser")) { console.error("módulo browser deshabilitado (fail closed): habilítalo con `axiom module on browser`"); process.exit(2); }
   const { estadoBrowser, capturar } = await import("./modules/browser/index.js");
-  const url = rest.filter((a) => a !== "--dom")[0];
-  if (!url) { console.log(estadoBrowser(root)); }
-  else if (!/^https?:\/\//.test(url)) { console.error("uso: axiom browser [<url> [--dom]]"); process.exit(2); }
-  else {
-    const r = capturar(root, url, rest.includes("--dom") ? "dom" : "png");
-    if (!r.ok) { console.error(r.error); process.exit(1); }
-    console.log(`captura OK [${r.motor}] ${r.bytes} B → ${r.ruta}${r.errorPagina ? ` · PÁGINA DE ERROR: ${r.errorPagina}` : ""}${r.timeoutMs ? ` · TIMEOUT DE RED: ${r.timeoutMs} ms (parte de timeout, la URL no quedó cargada)` : ""}`);
+  // Sesiones conducibles (ADR-0006): abrir|nav|click|type|wait|text|shot|
+  // cerrar|sesiones. La captura puntual (browser <url>) no cambia.
+  const ACCIONES_BROWSER = new Set(["abrir", "nav", "click", "type", "wait", "text", "shot", "cerrar", "sesiones"]);
+  const accionSesion = rest[0] && ACCIONES_BROWSER.has(rest[0]) ? rest[0] : undefined;
+  if (accionSesion === "sesiones") {
+    const { sesiones } = browserSesiones();
+    if (sesiones.length === 0) console.log("browser: sin sesiones abiertas (abre una con `axiom browser abrir <url>`)");
+    else for (const s of sesiones) console.log(`${s.id} · ${s.url} · ${s.motor} · ${s.acciones} acciones · creada ${s.creada}`);
+  } else if (accionSesion) {
+    const resto = rest.slice(1).filter((a) => a.length > 0);
+    const r = await browserAccion(root, accionSesion as TipoAccion, argsBrowser(accionSesion, resto), "cli");
+    console.log(r.msg);
+    if (accionSesion === "abrir" && r.code === 0) {
+      // La sesión no sobrevive a este proceso: la consola la conduce aquí dentro
+      // hasta `cerrar`/EOF (el EOF la cierra sola, sin dejar huérfanos).
+      await consolaSesion(root, String(r.datos?.sesion ?? ""));
+      process.exit(0);
+    }
+    process.exit(r.code === 0 ? 0 : r.code === 1 ? 1 : 2);
+  } else {
+    const url = rest.filter((a) => a !== "--dom")[0];
+    if (!url) { console.log(estadoBrowser(root)); }
+    else if (!/^https?:\/\//.test(url)) { console.error("uso: axiom browser [<url> [--dom]] | axiom browser abrir|nav|click|type|wait|text|shot|cerrar|sesiones"); process.exit(2); }
+    else {
+      const r = capturar(root, url, rest.includes("--dom") ? "dom" : "png");
+      if (!r.ok) { console.error(r.error); process.exit(1); }
+      console.log(`captura OK [${r.motor}] ${r.bytes} B → ${r.ruta}${r.errorPagina ? ` · PÁGINA DE ERROR: ${r.errorPagina}` : ""}${r.timeoutMs ? ` · TIMEOUT DE RED: ${r.timeoutMs} ms (parte de timeout, la URL no quedó cargada)` : ""}`);
+    }
   }
 }
 else if (cmd === "module" && rest[0] === "check") { const m = textoSuperficie(rest[1]); console.log(m); if (/FALLO/.test(m)) process.exit(2); }

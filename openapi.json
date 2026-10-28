@@ -175,7 +175,7 @@
       "post": {
         "operationId": "adaptersSpawn",
         "summary": "Chat directo con el proveedor activo",
-        "description": "Vista Chat: delega en adapters.spawn con budget; la key sale del env del servidor, nunca del navegador.",
+        "description": "Vista Chat: delega en adapters.spawn con budget; la key sale del env del servidor, nunca del navegador. Ajustes → Proveedor LLM lo usa además como «Probar conexión»: manda `proveedor`/`model`/`baseUrl` del formulario para probar lo elegido sin guardarlo, y el texto del error del proveedor vuelve en `error` tal cual.",
         "tags": [
           "configuracion"
         ],
@@ -694,7 +694,7 @@
       "get": {
         "operationId": "adaptersModelos",
         "summary": "Catálogo de modelos por proveedor con filtro",
-        "description": "?proveedor=…&filtro=todos|free|recomendados. Con proveedor=openrouter&live=1 lista la oferta real (requiere key en servidor).",
+        "description": "`?proveedor=…&filtro=todos|free|recomendados`. `proveedor` es opcional: sin él se usa el guardado en adapters.config.json y con él se listan los del proveedor elegido en el formulario, aunque todavía no esté guardado (pegar la key y pulsar «Cargar modelos» funciona sin guardar antes). Con `proveedor=openrouter` se lista la oferta real del proveedor y falla cerrado si no hay OPENROUTER_API_KEY en el servidor.",
         "tags": [
           "configuracion"
         ],
@@ -705,6 +705,31 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelosView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`proveedor` no es uno de los conocidos (off|ollama|litellm|openai|anthropic|google|openrouter)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "error"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -941,7 +966,8 @@
           }
         }
       }
-    },    "/api/trazas": {
+    },
+    "/api/trazas": {
       "get": {
         "operationId": "getTrazas",
         "summary": "Lista las trazas de tool calls",
@@ -987,7 +1013,227 @@
         }
       }
     },
-
+    "/api/browser/sesiones": {
+      "get": {
+        "operationId": "browserSesiones",
+        "summary": "Sesiones de navegador vivas en este proceso",
+        "description": "Lista las sesiones conducibles abiertas (ADR-0006): id, url, motor, acciones gastadas y si siguen vivas. Viven en memoria del proceso que sirve: un proceso distinto devuelve la lista vacía en vez de inventar sesiones. 409 = módulo browser apagado (fail closed).",
+        "tags": [
+          "vistas"
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesiones vivas (lista vacía si no hay ninguna)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "sesiones"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "sesiones": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "url",
+                          "motor",
+                          "acciones",
+                          "creada",
+                          "viva"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "URL actual de la pestaña"
+                          },
+                          "motor": {
+                            "type": "string"
+                          },
+                          "acciones": {
+                            "type": "integer",
+                            "description": "Acciones gastadas contra el presupuesto duro de la sesión"
+                          },
+                          "creada": {
+                            "type": "string",
+                            "description": "ISO de apertura"
+                          },
+                          "viva": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Fail closed: módulo browser deshabilitado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "error"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/browser/accion": {
+      "post": {
+        "operationId": "browserAccion",
+        "summary": "Ejecuta una acción de sesión (abrir, nav, clic, escribir, esperar, leer, capturar, cerrar)",
+        "description": "Misma fachada que la CLI (`axiom browser …`) con origen `web` en la traza: validación previa, decisión única en el broker y límites duros de sesión. `args` lleva los parámetros de la acción (url, selector, texto, ms, sesion). 200 = acción ejecutada; 409 = fail closed (módulo apagado, sin motor, deny del broker, ask sin aprobar — el `msg` trae el id aprobable —, límite de sesión o validación); 400 = petición mal formada.",
+        "tags": [
+          "broker"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "accion"
+                ],
+                "properties": {
+                  "accion": {
+                    "type": "string",
+                    "enum": [
+                      "abrir",
+                      "nav",
+                      "click",
+                      "type",
+                      "wait",
+                      "text",
+                      "shot",
+                      "cerrar"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "description": "Parámetros de la acción: url (http/https), selector, texto, ms (0-60000), sesion"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Acción ejecutada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "code",
+                    "msg"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "integer"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "datos": {
+                      "type": "object",
+                      "description": "Detalle de la acción (url final, ruta de la captura…)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Petición mal formada (acción desconocida o args no-objeto)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "error"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Fail closed: módulo apagado, sin motor, deny/ask del broker sin aprobar, límite de sesión o validación rechazada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "code",
+                    "msg"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "code": {
+                      "type": "integer"
+                    },
+                    "msg": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/proyecto": {
       "get": {
         "operationId": "proyecto",
@@ -2490,10 +2736,21 @@
                 "id": { "type": "string" },
                 "tool": { "type": "string" },
                 "riesgo": { "type": "string" },
-                "estado": { "type": "string" },
+                "estado": {
+                  "type": "string",
+                  "description": "pendiente|aprobada|rechazada|usada|expirada|denegada-por-politica|denegada-por-agente|denegada-sin-agente. `usada` = concesión ya gastada por su único uso."
+                },
                 "agente": {
                   "type": "string",
                   "description": "Agente que pidió la herramienta; vacío si el check no tuvo agente."
+                },
+                "usada_at": {
+                  "type": "string",
+                  "description": "Cuándo se consumió la concesión (ISO); vacío si sigue disponible o no se aprobó."
+                },
+                "usada_por": {
+                  "type": "string",
+                  "description": "Corrida que gastó la concesión (ej. run spec/tarea); vacío en bases anteriores a esa columna."
                 },
                 "declaracion": {
                   "type": "string",
@@ -2700,6 +2957,31 @@
           },
           "timeoutMs": {
             "type": "integer"
+          },
+          "maxChars": {
+            "type": "integer",
+            "description": "Tope de caracteres de la respuesta (el chat usa el de la config; «Probar conexión» manda 200)."
+          },
+          "proveedor": {
+            "type": "string",
+            "enum": [
+              "off",
+              "ollama",
+              "litellm",
+              "openai",
+              "anthropic",
+              "google",
+              "openrouter"
+            ],
+            "description": "Proveedor a probar en lugar del guardado; no lo persiste. 400 si no es uno de los admitidos."
+          },
+          "baseUrl": {
+            "type": "string",
+            "description": "URL base solo para esta llamada (http/https); 400 si no es una URL válida."
+          },
+          "model": {
+            "type": "string",
+            "description": "Modelo solo para esta llamada; vacío usa el de la config."
           }
         }
       },
@@ -2871,6 +3153,10 @@
         "properties": {
           "ok": {
             "type": "boolean"
+          },
+          "proveedor": {
+            "type": "string",
+            "description": "Proveedor cuyo catálogo se listó (el de `?proveedor=` o el guardado)."
           },
           "modelos": {
             "type": "array",

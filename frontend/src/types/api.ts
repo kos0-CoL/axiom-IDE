@@ -21,10 +21,14 @@ export interface AprobacionView {
   id: string;
   tool: string;
   riesgo: 'bajo' | 'medio' | 'alto';
-  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'expirada' | 'denegada-por-politica' | 'denegada-por-agente' | 'denegada-sin-agente';
+  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'usada' | 'expirada' | 'denegada-por-politica' | 'denegada-por-agente' | 'denegada-sin-agente';
   created_at: string;
   decided_by: string;
   decided_at: string;
+  /** Cuándo se gastó la concesión (ISO); vacío si sigue disponible o no se aprobó. */
+  usada_at: string;
+  /** Corrida que gastó la concesión (ej. run spec/tarea); vacío en bases viejas. */
+  usada_por: string;
   /** Agente que pidió la herramienta; vacío si el check no tuvo agente. */
   agente: string;
   /** Declaración vigente del agente para esa herramienta ('' si no la declara). */

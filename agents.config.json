@@ -160,7 +160,13 @@
       "skills": [
         "policy",
         "sandbox",
-        "seguridad"
+        "seguridad",
+        "sec-threat-model",
+        "sec-cve",
+        "sec-hardening",
+        "sec-injection",
+        "sec-auth",
+        "sec-net"
       ],
       "instrucciones": "Revisa secretos, permisos, validación de entrada, dependencias nuevas y cambios de CI/configuración. Mínimo privilegio y aislamiento.",
       "herramientas": [

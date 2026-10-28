@@ -60,17 +60,18 @@ export interface UsoAutorizado {
 // Puerta del runner: cada herramienta que se va a usar se autoriza ANTES de
 // gastar un spawn o de escribir. Primero se consume una aprobación ya concedida
 // (autoriza un uso, y solo si la declaración vigente sigue permitiéndolo) y, si
-// no hay, decide el broker con la declaración del agente.
-export function autorizarUso(root: string, agenteId: string, tool: string, contrato: ToolContract): UsoAutorizado {
+// no hay, decide el broker con la declaración del agente. `por` nombra la corrida
+// que se lleva la concesión, para que Aprobaciones pueda decir quién la gastó.
+export function autorizarUso(root: string, agenteId: string, tool: string, contrato: ToolContract, por = ""): UsoAutorizado {
   const d = declaracionDeHerramienta(root, agenteId, tool);
   // Una concesión solo resuelve un `ask`: nunca salta un deny de política vigente.
   if (!("error" in d) && d.acceso !== "deny" && effectiveAllow(root, tool, contrato).decision !== "deny") {
-    const aprobada = consumirAprobacion(root, d.tool, agenteId);
+    const aprobada = consumirAprobacion(root, d.tool, agenteId, por);
     if (aprobada) {
       return { decision: "allow", motivo: `aprobación ${aprobada.id} consumida por ${agenteId}:${d.tool}`, id: aprobada.id };
     }
   }
-  return check(root, tool, contrato, d, { origen: "run", entrada: { agente: agenteId, tool } });
+  return check(root, tool, contrato, d, { origen: "run", entrada: { agente: agenteId, tool, por }, contexto: por });
 }
 
 // Un uso no permitido detiene la corrida con el motivo del broker, no con un
@@ -225,10 +226,11 @@ export async function ejecutarTareaGrafo(
   // spawn (delegar al nodo, que el nodo escriba su trabajo y que lo entregue al
   // juez). Si algo se niega o queda pendiente, no se ejecuta nada ni se gasta en
   // un paso que después no se podría cerrar.
+  const corrida = `run ${specId}/${taskId}`;
   const usos: Array<[string, string, UsoAutorizado]> = [
-    [orquestador.id, "delega", autorizarUso(root, orquestador.id, "delega", DELEGA_CONTRACT)],
-    [delegado.id, "editar", autorizarUso(root, delegado.id, "editar", EDITAR_CONTRACT)],
-    [delegado.id, "delega", autorizarUso(root, delegado.id, "delega", DELEGA_CONTRACT)],
+    [orquestador.id, "delega", autorizarUso(root, orquestador.id, "delega", DELEGA_CONTRACT, corrida)],
+    [delegado.id, "editar", autorizarUso(root, delegado.id, "editar", EDITAR_CONTRACT, corrida)],
+    [delegado.id, "delega", autorizarUso(root, delegado.id, "delega", DELEGA_CONTRACT, corrida)],
   ];
   const bloqueos = usos.map(([agente, tool, uso]) => motivoBloqueo(agente, tool, uso)).filter((m): m is string => !!m);
   if (bloqueos.length) {

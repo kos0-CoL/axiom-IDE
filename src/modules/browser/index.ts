@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import type { LlamadaTrazable } from "../../broker.js";
+import { listarSesiones } from "./sesion.js";
 
 export const NOMBRE = "browser";
 
@@ -52,7 +54,7 @@ interface ConfigBrowser {
 const TIMEOUT_DEFAULT = 20_000;
 const CARPETA = [".axiom", "browser"] as const;
 
-function leerConfig(root: string): ConfigBrowser {
+export function leerConfig(root: string): ConfigBrowser {
   try {
     const j = JSON.parse(readFileSync(join(root, "browser.config.json"), "utf8")) as unknown;
     if (!j || typeof j !== "object" || Array.isArray(j)) return {};
@@ -316,10 +318,14 @@ export function datosModulo(root: string): {
   paquetes: string[];
   items: { id: string; nota: string }[];
   capturas: CapturaBrowser[];
+  sesiones: ReturnType<typeof listarSesiones>;
   fuente: string;
 } {
   const motor = detectarMotor(root);
   const capturas = listarCapturas(root);
+  // Sesiones conducibles (ADR-0006): viven en memoria de este proceso; si el
+  // panel no puede verlas (proceso distinto) se lista vacío, sin inventar.
+  const sesiones = listarSesiones();
   return {
     titulo: "Capturas de navegador (evidencia)",
     motor: motor
@@ -328,10 +334,29 @@ export function datosModulo(root: string): {
     paquetes: paquetesInstalados(root),
     items: capturas.map((c) => ({ id: c.id, nota: `${c.modo} · ${c.bytes} B · ${c.fecha}` })),
     capturas,
+    sesiones,
     fuente: motor
       ? `Motor: ${motor.nombre} (${motor.origen}) · capturas en ${CARPETA.join("/")}/ · usa \`axiom browser <url>\` para capturar`
       : "Sin motor: instala la caché de Playwright (`npx playwright install chromium`) o declara executablePath en browser.config.json",
   };
+}
+
+// --- Sesiones conducibles (ADR-0006): misma autoridad que la CLI/web ---
+export type { TipoAccion, RespuestaAccion } from "./sesion.js";
+export { ACCIONES, esAccion } from "./sesion.js";
+export { listarSesiones as sesionesVivas };
+
+// Fachada única de las acciones de sesión: CLI, web y agente pasan por aquí
+// para que la validación, la decisión del broker y los límites duros sean los
+// mismos y las trazas lleven el origen de quien llamó.
+export async function ejecutarSesion(
+  root: string,
+  a: import("./sesion.js").TipoAccion,
+  args: Record<string, unknown>,
+  llamada?: LlamadaTrazable,
+): Promise<{ ok: boolean; code: number; msg: string; datos?: Record<string, unknown> }> {
+  const { ejecutar } = await import("./sesion.js");
+  return ejecutar(root, a, args, llamada ?? {});
 }
 
 export function estadoBrowser(root: string): string {

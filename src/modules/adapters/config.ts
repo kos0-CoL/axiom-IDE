@@ -60,10 +60,13 @@ export const MODELOS: Record<Exclude<Proveedor, "off">, ModeloInfo[]> = {
     { id: "gemini-2.5-flash", free: true, recomendado: true, nota: "cuota free" },
     { id: "gemini-2.5-pro", recomendado: true, nota: "code" },
   ],
+  // Ids comprobados contra el catálogo vivo del proveedor (GET /api/v1/models).
+  // OpenRouter rota su oferta: si ningún id curado sigue vivo, filtrarModelosLive
+  // devuelve el catálogo completo en vez de dejar el desplegable vacío.
   openrouter: [
-    { id: "meta-llama/llama-3.1-8b-instruct:free", free: true, recomendado: true, nota: "free" },
-    { id: "qwen/qwen-2.5-coder-32b-instruct:free", free: true, recomendado: true, nota: "free code" },
-    { id: "google/gemini-2.0-flash-001", recomendado: true, nota: "barato code" },
+    { id: "cohere/north-mini-code:free", free: true, recomendado: true, nota: "free code" },
+    { id: "google/gemma-4-31b-it:free", free: true, recomendado: true, nota: "free" },
+    { id: "google/gemini-3.5-flash-lite", recomendado: true, nota: "barato code" },
     { id: "anthropic/claude-sonnet-4.5", recomendado: true, nota: "code" },
   ],
 };

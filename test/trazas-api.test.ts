@@ -96,6 +96,37 @@ test("GET /api/trazas devuelve filas con linea formateado y filtra por contexto"
   assert.equal(l2.limite, 200, "tope 200");
 });
 
+test("el vacío por filtro sin coincidencias es 200 ok y distinto del vacío real", async () => {
+  // 1) Filtro sin coincidencias: la respuesta es un 200 ok con lista vacía
+  //    (no un error), con el contexto ecoado — lo que la vista usa para decir
+  //    «el filtro las excluye» en vez de «todavía no hay trazas».
+  const sin = (await (await fetch(`${base}/api/trazas?contexto=zzz-sin-coincidencias`)).json()) as TrazaApi;
+  assert.equal(sin.ok, true, "sin coincidencias no es error: es ok con lista vacía");
+  assert.deepEqual(sin.trazas, [], "el filtro aísla a cero filas");
+  assert.equal(sin.contexto, "zzz-sin-coincidencias", "el endpoint ecoa el filtro aplicado");
+
+  // 2) Sin filtro, la misma base sigue devolviendo filas: el vacío lo produjo
+  //    el filtro, no la ausencia de datos.
+  const todas = (await (await fetch(`${base}/api/trazas`)).json()) as TrazaApi;
+  assert.ok(todas.trazas.length >= 2, "la base sí tiene trazas sin el filtro");
+
+  // 3) Vacío real: raíz sin ninguna traza → misma forma (ok + lista vacía),
+  //    así que la distinción en el panel la da el filtro activo, no la forma.
+  const vacia = mkdtempSync(join(tmpdir(), "axiom-trazas-vacia-"));
+  const w = startWeb(vacia, await puertoLibre());
+  try {
+    const r = await fetch(`http://127.0.0.1:${w.port}/api/trazas`);
+    assert.equal(r.status, 200);
+    const d = (await r.json()) as TrazaApi;
+    assert.equal(d.ok, true);
+    assert.deepEqual(d.trazas, []);
+    assert.equal(d.contexto, "", "sin filtro no hay contexto ecoado");
+  } finally {
+    w.close();
+    rmSync(vacia, { recursive: true, force: true });
+  }
+});
+
 test("la vista Trazas está en el HTML y consume la API", () => {
   assert.match(PAGE, /data-view="trz"/, "botón Trazas en la barra de vistas");
   assert.match(PAGE, /id="v-trz"/, "la vista existe");

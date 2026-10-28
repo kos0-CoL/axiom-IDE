@@ -4,12 +4,12 @@
   "axiom": "^0.9",
   "scope": "global",
   "default": false,
-  "description": "Fachada sobre un motor de navegador headless (Playwright cache o binarios del sistema): captura screenshot o DOM de una URL como evidencia. Fail soft si no hay motor.",
-  "contracts": ["browser.captura"],
+  "description": "Fachada sobre un motor de navegador headless (Playwright cache o binarios del sistema): captura screenshot o DOM de una URL como evidencia, y sesiones conducibles (abrir/navegar/clic/escribir/leer/capturar/cerrar) vía CDP para verificar UI. Fail soft si no hay motor.",
+  "contracts": ["browser.captura", "browser.sesion"],
   "transports": ["cli", "web"],
   "patterns": ["fail-closed", "single-source"],
   "config_file": "browser.config.json",
   "panel": { "tipo": "lista" },
-  "editables": ["manifest.json", "index.ts", "config.ts"],
-  "cli": ["browser", "browser <url> [--dom]", "module datos browser"]
+  "editables": ["manifest.json", "index.ts", "config.ts", "sesion.ts"],
+  "cli": ["browser", "browser <url> [--dom]", "browser abrir|nav|click|type|wait|text|shot|cerrar|sesiones", "module datos browser"]
 }
