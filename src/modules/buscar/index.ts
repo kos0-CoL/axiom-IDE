@@ -43,21 +43,53 @@ export async function buscarExterno(root: string, consulta: string, opts: Opcion
     const r = await (hacer as typeof fetch)("https://api.exa.ai/search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": key },
-      body: JSON.stringify({ query: consulta.slice(0, 500), numResults: n, contents: { text: { maxCharacters: 1000 } } }),
+      body: JSON.stringify({
+        query: consulta.slice(0, 500),
+        numResults: n,
+        contents: { text: { maxCharacters: 1200 }, highlights: { numSentences: 3, highlightsPerUrl: 2 } },
+      }),
       signal: ctrl.signal,
     } as Parameters<typeof fetch>[1]);
     if (!r.ok) throw new Error(`buscarExterno: EXA HTTP ${(r as Response).status}`);
-    const j = (await r.json()) as { results?: { title?: unknown; url?: unknown; text?: unknown }[] };
-    return (j.results ?? []).slice(0, n).map((x) => ({
-      titulo: String(x.title ?? "(sin título)").slice(0, 160),
-      url: String(x.url ?? "").slice(0, 300),
-      snippet: String(x.text ?? "").slice(0, MAX_SNIPPET),
-    }));
+    const j = (await r.json()) as { results?: { title?: unknown; url?: unknown; text?: unknown; highlights?: unknown }[] };
+    return (j.results ?? []).slice(0, n).map((x) => {
+      // Highlights primero (concisos y ajustados a relevancia); texto crudo si no hay.
+      const hl = Array.isArray(x.highlights) ? x.highlights.filter((h) => typeof h === "string").join(" … ") : "";
+      const snippet = (hl || String(x.text ?? "")).slice(0, MAX_SNIPPET);
+      return {
+        titulo: String(x.title ?? "(sin título)").slice(0, 160),
+        url: String(x.url ?? "").slice(0, 300),
+        snippet,
+      };
+    });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") throw new Error("buscarExterno: timeout de EXA");
     throw e;
   } finally {
     clearTimeout(t);
+  }
+}
+
+/**
+ * Enrich para el modo Plan: antepone referencias al prompt cuando el broker
+ * lo permite; si no, devuelve nota (sin secretos) para que el plan salga
+ * igual que hoy pero avisando. Best-effort: nunca lanza.
+ */
+export async function enriquecerPromptPlan(
+  root: string,
+  consulta: string,
+  opts: OpcionesBusqueda & { por?: string; agenteId?: string } = {},
+): Promise<{ contexto: string; nota?: string }> {
+  try {
+    const r = await enriquecerConBusqueda(root, opts.agenteId ?? "planificador", consulta, opts);
+    if (r.estado === "ok" && r.contexto) return { contexto: `\n\n${r.contexto}` };
+    if (r.estado === "pendiente") {
+      return { contexto: "", nota: `búsqueda externa pendiente de aprobación (${r.approvalId}): el plan sale sin referencias` };
+    }
+    if (r.estado === "denegado") return { contexto: "", nota: `sin referencias externas: ${r.motivo}` };
+    return { contexto: "" };
+  } catch (e) {
+    return { contexto: "", nota: `enrich no disponible: ${e instanceof Error ? e.message : e}` };
   }
 }
 

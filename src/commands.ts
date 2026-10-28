@@ -8,6 +8,7 @@ import { TaskContract } from "./contracts.js";
 import { SPEC_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE, VERIFICATION_TEMPLATE, OVERRIDES_README } from "./preset.js";
 import { check, decide } from "./broker.js";
 import { leerSkill } from "./skills.js";
+import { extraerMarcas, responderTodas } from "./modules/clarify/index.js";
 import { ejecutarScriptSkill } from "./modules/skills/runner.js";
 import { cicloImproductivo, checkTecho } from "./policy.js";
 import { huellaConfig, leerMarca, marcarRun, textoSnapshot } from "./runmark.js";
@@ -364,6 +365,43 @@ export function construirSkillsRun(root: string, id?: string, script?: string, d
   const cabeza = `skill ${id} · ${script} · sha ${r.sha256.slice(0, 8)} · ${r.ms}ms`;
   if (!r.ok) return { code: 1, msg: `${cabeza}\nERROR: ${r.error ?? "falló"}\n${r.salida}` };
   return { code: 0, msg: `${cabeza}${r.dryRun ? " [dry-run]" : ""}\n${r.salida}` };
+}
+
+export interface ResultadoClarifyCli { code: number; msg: string }
+
+/** Núcleo no interactivo de `axiom clarify` (testeable sin stdin). */
+export function construirClarify(spec: string, respuestas: string[]): { code: number; msg: string; markdown: string } {
+  const marcas = extraerMarcas(spec);
+  if (!marcas.length) return { code: 0, msg: "clarify: sin marcas [NEEDS CLARIFICATION], nada que preguntar", markdown: spec };
+  const r = responderTodas(spec, respuestas);
+  const lineas = [`clarify: ${r.hechas} respondida(s), ${r.omitidas} omitida(s), ${r.pendientes} pendiente(s)`];
+  return { code: 0, msg: lineas.join("\n"), markdown: r.markdown };
+}
+
+export async function cmdClarify(root: string, specArg?: string): Promise<void> {
+  const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+  const { extraerMarcas, formatearPregunta, aplicarRespuesta, MAX_PREGUNTAS } = await import("./modules/clarify/index.js");
+  if (!specArg) { console.error("uso: axiom clarify <spec> (p. ej. axiom clarify .speckit/build.md)"); process.exit(2); }
+  const p = specArg.startsWith("/") ? specArg : `${root}/${specArg}`;
+  if (!existsSync(p)) { console.error(`clarify: spec no encontrada: ${specArg}`); process.exit(2); }
+  let spec = readFileSync(p, "utf8");
+  const marcas = extraerMarcas(spec).slice(0, MAX_PREGUNTAS);
+  if (!marcas.length) { console.log("clarify: sin marcas [NEEDS CLARIFICATION], nada que preguntar"); return; }
+  const { createInterface } = await import("node:readline");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const preguntar = (texto: string): Promise<string> => new Promise((res) => rl.question(texto, res));
+  try {
+    for (let i = 0; i < marcas.length; i++) {
+      console.log(formatearPregunta(marcas[i], i + 1, marcas.length));
+      const r = await preguntar("Respuesta: ");
+      spec = aplicarRespuesta(spec, marcas[i], r).markdown;
+    }
+  } finally {
+    rl.close();
+  }
+  writeFileSync(p, spec);
+  const resto = extraerMarcas(spec).length;
+  console.log(`clarify: listo (${resto} marca(s) restante(s)${resto ? ", corre de nuevo o edita a mano" : ""})`);
 }
 
 export function cmdSkillsRun(root: string, id?: string, script?: string, dryRun = false): void {

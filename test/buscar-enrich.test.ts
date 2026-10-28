@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buscarExterno, enriquecerConBusqueda } from "../dist/modules/buscar/index.js";
+import { buscarExterno, enriquecerConBusqueda, enriquecerPromptPlan } from "../dist/modules/buscar/index.js";
 import { decide } from "../dist/broker.js";
 import { declaracionDeHerramienta } from "../dist/modules/agents/declaracion.js";
 
@@ -142,6 +142,54 @@ test("sin política que lo cubra: deny antes que ask", async () => {
       });
       assert.equal(r.estado, "denegado");
       assert.equal(red, false);
+    } finally {
+      delete process.env.EXA_API_KEY;
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("prefiere highlights al texto crudo", async () => {
+  const base = temp();
+  try {
+    process.env.EXA_API_KEY = "k";
+    try {
+      const stub = () =>
+        Promise.resolve({
+          ok: true as const,
+          json: () =>
+            Promise.resolve({
+              results: [
+                { title: "T", url: "https://e.test/x", text: "texto largo crudo", highlights: ["punto clave uno", "punto clave dos"] },
+              ],
+            }),
+        });
+      const r = await buscarExterno(base, "q", { fetchFn: stub });
+      assert.equal(r.length, 1);
+      assert.match(r[0].snippet, /punto clave uno/);
+      assert.ok(!r[0].snippet.includes("texto largo crudo"));
+    } finally {
+      delete process.env.EXA_API_KEY;
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("enriquecerPromptPlan devuelve contexto o nota sin lanzar", async () => {
+  const base = temp();
+  try {
+    roster(base);
+    politicaAsk(base);
+    process.env.EXA_API_KEY = "test-key";
+    try {
+      const p = await enriquecerPromptPlan(base, "algo", {
+        agenteId: "explorador",
+        fetchFn: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ results: [] }) }),
+      });
+      assert.equal(p.contexto, "");
+      assert.match(p.nota ?? "", /pendiente de aprobación/);
     } finally {
       delete process.env.EXA_API_KEY;
     }
