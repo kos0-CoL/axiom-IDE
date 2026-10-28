@@ -28,6 +28,7 @@ function deps(turnos: string[], extra: Partial<DepsLoop> = {}): { d: DepsLoop; v
     autorizar: async () => ALLOW,
     leer: () => "contenido real",
     delegar: async () => "subtarea hecha",
+    buscar: async () => "[1] Ref\nhttps://x\nsnippet",
     ...extra,
   };
   return { d, vistos };
@@ -117,10 +118,40 @@ test("sandbox de leer: dentro sí, fuera no, binario no", () => {
 });
 
 test("herramientasLoop solo ofrece leer/delega no-denegadas", () => {
-  assert.deepEqual(herramientasLoop({ herramientas: [{ tool: "leer", acceso: "allow" }, { tool: "buscar", acceso: "allow" }] }), ["leer"]);
+  assert.deepEqual(herramientasLoop({ herramientas: [{ tool: "leer", acceso: "allow" }, { tool: "buscar", acceso: "allow" }] }), ["leer", "buscar"]);
   assert.deepEqual(herramientasLoop({ herramientas: [{ tool: "leer", acceso: "deny" }] }), []);
   assert.deepEqual(herramientasLoop({ herramientas: [] }), []);
-  assert.ok(!seccionHerramientas(["leer"]).includes("delega"), "el prompt no ofrece buscar ni delega si no toca");
+  assert.ok(!seccionHerramientas(["leer"]).includes("delega"), "el prompt no lista lo no ofrecido");
+  assert.ok(seccionHerramientas(["leer", "delega", "buscar"]).includes('"tool":"buscar"'), "buscar documentada cuando se ofrece");
+});
+
+test("buscar real en el loop: refs como dato, sin key como error-dato", async () => {
+  const { d, vistos } = deps([
+    '```tool\n{"tool":"buscar","consulta":"rate limit exa"}\n```',
+    "síntesis con refs",
+  ], { buscar: async (q) => `[1] Doc\nhttps://doc\nRef sobre ${q}` });
+  const r = await correrLoop("incidentes", "base", ["buscar"], d);
+  assert.equal(r.herramientas, 1);
+  assert.match(vistos[1], /Ref sobre rate limit exa/);
+  assert.equal(r.texto, "síntesis con refs");
+  // Sin key el ejecutor real falla cerrado como dato: el loop sigue.
+  const base = mkdtempSync(join(tmpdir(), "axiom-loop-buscar-"));
+  const root = join(base, "p");
+  try {
+    assert.deepEqual(asegurarProyecto(root), { ok: true });
+    const agente = { id: "incidentes", rol: "nodo" as const, modelo: "hereda-proveedor", estado: "activo" as const, skills: [], instrucciones: "", herramientas: [{ tool: "buscar", acceso: "allow" as const }] };
+    let turno = 0;
+    const r2 = await ejecutarAgenteConTools(root, agente, "investiga x", {
+      falsos: {
+        spawn: (async () => (++turno === 1 ? OK('```tool\n{"tool":"buscar","consulta":"x"}\n```') : OK("final sin red"))) as DepsLoop["spawn"],
+        autorizar: async () => ALLOW,
+      },
+    });
+    assert.equal(r2.texto, "final sin red");
+    assert.equal(r2.herramientas, 1);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test("ejecutarAgenteConTools integra broker real: deny de leer aborta", async () => {

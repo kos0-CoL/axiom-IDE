@@ -13,18 +13,20 @@ writeFileSync(join(root, "src", "suma.ts"), "export function suma(a: number, b: 
 
 const turnos = [
   'Reviso la implementación antes de informar.\n```tool\n{"tool":"leer","ruta":"src/suma.ts"}\n```',
+  'Confirmo la convención de nombres.\n```tool\n{"tool":"buscar","consulta":"typescript sum function convention"}\n```',
   "La función suma(a, b) devuelve a + b. Trabajo verificado contra el archivo.",
 ];
 let i = 0;
-const r = await correrLoop("revisor", "Informa qué hace src/suma.ts.", ["leer"], {
+const r = await correrLoop("revisor", "Informa qué hace src/suma.ts.", ["leer", "buscar"], {
   spawn: async () => ({ ok: true, text: turnos[Math.min(i++, turnos.length - 1)] }),
   autorizar: async () => ({ decision: "allow", motivo: "demo" }),
   leer: (ruta) => leerArchivoSandbox(root, ruta),
   delegar: async () => { throw new Error("demo sin delega"); },
+  buscar: async (q) => `[1] Convención\nhttps://ejemplo\nRef sobre ${q}`,
 });
 console.log(`demo tool-loop: turnos=${r.turnos} herramientas=${r.herramientas}`);
 console.log(`final: ${r.texto}`);
-if (r.turnos !== 2 || r.herramientas !== 1 || !r.texto.includes("a + b")) {
+if (r.turnos !== 3 || r.herramientas !== 2 || !r.texto.includes("a + b")) {
   console.error("DEMO FALLIDA");
   process.exit(1);
 }

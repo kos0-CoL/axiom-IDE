@@ -10,7 +10,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, normalize, relative, resolve, sep } from "node:path";
 import type { SpawnResult } from "../../adapters.js";
 
-export type NombreToolLoop = "leer" | "delega";
+export type NombreToolLoop = "leer" | "delega" | "buscar";
 
 export interface LlamadaToolLoop {
   tool: NombreToolLoop;
@@ -33,6 +33,8 @@ export interface DepsLoop {
   autorizar: (tool: NombreToolLoop, objetivo: string) => AutorizacionLoop | Promise<AutorizacionLoop>;
   /** Lectura real (producción: sandbox al root). */
   leer: (ruta: string) => string;
+  /** Búsqueda externa real (producción: buscarExterno crudo; el gate es el autorizar del loop). */
+  buscar: (consulta: string) => Promise<string>;
   /** Subagente real de una pasada (sin loop anidado). */
   delegar: (agenteId: string, tarea: string) => Promise<string>;
   /** Consumo por turno (producción: addConsumo+recordUso). */
@@ -65,6 +67,11 @@ function esLlamadaUtil(o: unknown): LlamadaToolLoop | null {
     const ruta = r["ruta"].trim();
     if (ruta.length > 200) return null;
     return { tool: "leer", objetivo: ruta, tarea: "" };
+  }
+  if (r["tool"] === "buscar" && typeof r["consulta"] === "string" && r["consulta"].trim()) {
+    const consulta = r["consulta"].trim();
+    if (consulta.length > 500) return null;
+    return { tool: "buscar", objetivo: consulta, tarea: "" };
   }
   if (r["tool"] === "delega" && typeof r["agente"] === "string" && typeof r["tarea"] === "string") {
     const agente = r["agente"].trim();
@@ -100,6 +107,7 @@ export function seccionHerramientas(ofrecidas: NombreToolLoop[]): string {
   const docs = [
     '- leer: {"tool":"leer","ruta":"src/x.ts"} — lee un archivo del workspace (solo lectura, acotado).',
     '- delega: {"tool":"delega","agente":"explorador","tarea":"..."} — pide a un especialista una subtarea estrecha.',
+    '- buscar: {"tool":"buscar","consulta":"..."} — referencias externas (requiere aprobación; sin key no hay red).',
   ].filter((d) => ofrecidas.some((o) => d.startsWith(`- ${o}:`)));
   return [
     ``,
@@ -166,7 +174,7 @@ export async function correrLoop(
       usadas++;
       let resultado: string;
       try {
-        resultado = l.tool === "leer" ? deps.leer(l.objetivo) : await deps.delegar(l.objetivo, l.tarea);
+        resultado = l.tool === "leer" ? deps.leer(l.objetivo) : l.tool === "delega" ? await deps.delegar(l.objetivo, l.tarea) : await deps.buscar(l.objetivo);
       } catch (e) {
         resultado = `error: ${e instanceof Error ? e.message : e}`;
       }

@@ -172,9 +172,8 @@ async function ejecutarAgente(root: string, agente: AgenteEjecutable, prompt: st
   return spawn(root, prompt, propio ? { model: propio } : {});
 }
 
-// Herramientas con ejecución real en v1 (el prompt solo lista estas dos;
-// `buscar` queda fuera hasta que el loop necesite red con aprobación).
-const TOOLS_LOOP: NombreToolLoop[] = ["leer", "delega"];
+// Herramientas con ejecución real en el loop (el prompt solo lista estas).
+const TOOLS_LOOP: NombreToolLoop[] = ["leer", "delega", "buscar"];
 
 const LEER_CONTRACT: ToolContract = {
   name: "leer",
@@ -190,7 +189,7 @@ export function herramientasLoop(agente: Pick<AgenteEjecutable, "herramientas">)
 
 export interface OpcionesAgenteTools extends OpcionesLoop {
   /** Solo tests: sustituye spawn/ejecutores reales. Parcial (merge con reales). */
-  falsos?: Partial<Pick<DepsLoop, "spawn" | "autorizar" | "leer" | "delegar">>;
+  falsos?: Partial<Pick<DepsLoop, "spawn" | "autorizar" | "leer" | "delegar" | "buscar">>;
 }
 
 /**
@@ -211,11 +210,28 @@ export async function ejecutarAgenteConTools(
     const { ejecutarConRoster } = await import("../../orchestrator/agent-tool.js");
     return ejecutarConRoster(root, agenteId, tarea, { loop: false });
   };
+  const buscarReal = async (consulta: string): Promise<string> => {
+    // Un solo gate: el autorizar del loop (BUSCAR_CONTRACT openWorld).
+    // buscarExterno crudo: sin key o fallo de red lanza y el loop lo
+    // devuelve como dato, sin tumbar.
+    const { buscarExterno } = await import("../buscar/index.js");
+    const rs = await buscarExterno(root, consulta);
+    if (!rs.length) return "buscar: sin resultados";
+    return rs.map((r, i) => `[${i + 1}] ${r.titulo}\n${r.url}\n${r.snippet}`).join("\n");
+  };
   const deps: DepsLoop = {
     spawn: opts.falsos?.spawn ?? ((p: string, m?: string) => spawn(root, p, m ? { model: m } : {})),
-    autorizar: opts.falsos?.autorizar ?? ((tool, objetivo) => autorizarUso(root, agente.id, tool, tool === "leer" ? LEER_CONTRACT : DELEGA_CONTRACT, `${corrida}→${tool}:${objetivo}`)),
+    autorizar: opts.falsos?.autorizar ?? (async (tool, objetivo) => {
+      // BUSCAR_CONTRACT por import dinámico: buscar/index importa este
+      // módulo (ciclo estático si fuera al revés); en diferido es seguro.
+      const contrato = tool === "leer" ? LEER_CONTRACT : tool === "buscar"
+        ? (await import("../buscar/index.js")).BUSCAR_CONTRACT
+        : DELEGA_CONTRACT;
+      return autorizarUso(root, agente.id, tool, contrato, `${corrida}→${tool}:${objetivo}`);
+    }),
     leer: opts.falsos?.leer ?? ((ruta) => leerArchivoSandbox(root, ruta)),
     delegar: opts.falsos?.delegar ?? delegarReal,
+    buscar: opts.falsos?.buscar ?? buscarReal,
     registrarUso: (uso) => { try { addConsumo(root, uso.total, 1); recordUso(root, uso); } catch { /* el consumo nunca tumba el trabajo */ } },
   };
   return correrLoop(agente.id, prompt, ofrecidas, deps, { modelo: modeloDeAgente(agente), maxTurnos: opts.maxTurnos, maxPorTurno: opts.maxPorTurno, maxTotal: opts.maxTotal });
