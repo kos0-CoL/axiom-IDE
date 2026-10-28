@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { leerChecklist, marcarHecha } from "../spec/checklist.js";
 import { escribirArchivo } from "../server/filesystem.js";
 import { validarCodigo } from "../nodes/validator.js";
+import { componerAnteFalloAsync, sanearCodigo, type PropuestaVarianteAsync } from "./variantes.js";
 
 export type TipoEvento = "status" | "file_start" | "file_success" | "error" | "complete";
 
@@ -34,6 +35,12 @@ export interface DepsOrquestador {
   generarCodigo: (ruta: string, spec: string) => Promise<string> | string;
   emitir?: (evento: EventoBuild) => void;
   maxFallos?: number;
+  /**
+   * Ante un fallo de validación, variantes a probar antes de contar el
+   * fallo (tope 2, las que sobren se ignoran). Por defecto: reintento del
+   * coder (fresh sample) + saneado local barato del código fallido.
+   */
+  construirVariantes?: (ruta: string, codigo: string, motivo: string, spec: string) => PropuestaVarianteAsync[];
 }
 
 const MAX_FALLOS_DEFECTO = 3;
@@ -86,10 +93,36 @@ export class AgentOrchestrator {
 
       const v = validarCodigo(codigo);
       if (!v.ok) {
-        this.emitir({ type: "error", ruta, intento, mensaje: `validación: ${v.errores.join("; ")}` });
-        const r = this.registrarFallo(ruta, intento, maxFallos, `validación: ${v.errores.join("; ")}`, procesados);
-        if (r) return r;
-        continue;
+        const motivo = `validación: ${v.errores.join("; ")}`;
+        // Ciclo Propose–Probe–Compose en pequeño: 2 variantes antes de
+        // contar el fallo. Si una pasa, se compone sin penalizar el intento.
+        const variantes = (this.deps.construirVariantes?.(ruta, codigo, motivo, spec) ?? [
+          {
+            id: "v1-reintento-coder",
+            descripcion: "nueva muestra del coder",
+            producir: () => this.deps.generarCodigo(ruta, spec),
+          },
+          {
+            id: "v2-saneado-local",
+            descripcion: "saneado local (sin cercas ni cháchara)",
+            producir: () => sanearCodigo(codigo),
+          },
+        ]) as PropuestaVarianteAsync[];
+        let compuesto: { codigo?: string; ganadora?: string } = {};
+        try {
+          compuesto = await componerAnteFalloAsync(this.root, `${this.specRel}#${ruta}`, motivo, variantes);
+        } catch {
+          compuesto = {};
+        }
+        if (compuesto.codigo) {
+          this.emitir({ type: "status", ruta, mensaje: `variante ${compuesto.ganadora} compuesta tras fallo (${motivo})` });
+          codigo = compuesto.codigo;
+        } else {
+          this.emitir({ type: "error", ruta, intento, mensaje: motivo });
+          const r = this.registrarFallo(ruta, intento, maxFallos, motivo, procesados);
+          if (r) return r;
+          continue;
+        }
       }
 
       try {

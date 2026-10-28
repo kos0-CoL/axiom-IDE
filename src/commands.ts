@@ -307,6 +307,48 @@ export async function cmdRun(root: string, id?: string, maxRondas = 3, tokens = 
   if (r.code !== 0) process.exit(r.code);
 }
 
+// Núcleo de `axiom build` sin process.exit (tests y web lo reutilizan).
+// Corre el pipeline Speckit con el coder LLM real; `--resume` retoma un
+// build pausado sin reescribir lo ya hecho.
+export interface ResultadoBuildCli { code: number; msg: string }
+
+export async function construirBuild(
+  root: string,
+  specArg?: string,
+  resume = false,
+  generarCodigo?: (ruta: string, spec: string) => Promise<string> | string,
+): Promise<ResultadoBuildCli> {
+  const specRel = (specArg ?? ".speckit/build.md").trim() || ".speckit/build.md";
+  if (specRel.includes("..") || specRel.startsWith("/")) return { code: 2, msg: `build: spec fuera del proyecto: ${specRel}` };
+  const { AgentOrchestrator } = await import("./orchestrator/orchestrator.js");
+  const { reanudarBuild } = await import("./orchestrator/resume.js");
+  const { generarCodigoLLM } = await import("./nodes/coder-llm.js");
+  const gen = generarCodigo ?? ((ruta: string, spec: string) => generarCodigoLLM(root, ruta, spec));
+  const lineas: string[] = [`build ${resume ? "reanudado" : "iniciado"}: ${specRel}`];
+  const emitir = (e: { type: string; ruta?: string; mensaje?: string; intento?: number }): void => {
+    if (e.type === "file_start") lineas.push(`  → ${e.ruta} (intento ${e.intento ?? 1})`);
+    else if (e.type === "file_success") lineas.push(`  ✔ ${e.ruta}`);
+    else if (e.type === "error") lineas.push(`  ! ${e.ruta ?? "build"}: ${e.mensaje ?? ""}`);
+  };
+  try {
+    const r = resume
+      ? await reanudarBuild(root, specRel, { generarCodigo: gen, emitir })
+      : await new AgentOrchestrator(root, specRel, { generarCodigo: gen, emitir }).ejecutar();
+    const n = Object.keys(r.fallos ?? {}).length;
+    lineas.push(r.estado === "completo" ? `build completo: ${r.procesados} archivo(s)` : `build pausado: ${r.procesados} archivo(s), ${n} con fallos`);
+    return { code: r.estado === "completo" ? 0 : 1, msg: lineas.join("\n") };
+  } catch (e) {
+    return { code: 2, msg: `build: ${e instanceof Error ? e.message : e}` };
+  }
+}
+
+export async function cmdBuild(root: string, specArg?: string, resume = false): Promise<void> {
+  const r = await construirBuild(root, specArg, resume);
+  const out = r.code === 0 ? console.log : console.error;
+  out(r.msg);
+  if (r.code !== 0) process.exit(r.code);
+}
+
 // Formato de una traza de tool call para la consola: qué, quién, qué decidió,
 // cuánto tardó y el IO resumido (AXM-066). Exportado para los tests.
 export function lineaTraza(z: { ts: string; origen: string; tool: string; agente: string; decision: string; approval_id: string; entrada: string; salida: string; sha_io: string; contexto: string; ms: number }): string {
