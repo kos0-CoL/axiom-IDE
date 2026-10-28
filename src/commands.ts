@@ -321,8 +321,24 @@ export async function construirBuild(
   resume = false,
   generarCodigo?: (ruta: string, spec: string) => Promise<string> | string,
 ): Promise<ResultadoBuildCli> {
-  const specRel = (specArg ?? ".speckit/build.md").trim() || ".speckit/build.md";
-  if (specRel.includes("..") || specRel.startsWith("/")) return { code: 2, msg: `build: spec fuera del proyecto: ${specRel}` };
+  const { resolverSpecBuild, asegurarTasksDesdePlan } = await import("./orchestrator/desde-plan.js");
+  let specRel: string;
+  try {
+    specRel = resolverSpecBuild(specArg);
+  } catch (e) {
+    return { code: 2, msg: e instanceof Error ? e.message : String(e) };
+  }
+  // Id de spec activa: asegura tasks.md (reutiliza o deriva UNA vez con el proveedor).
+  const m = /^specs\/active\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/tasks\.md$/.exec(specRel);
+  if (m && !resume) {
+    const { spawn } = await import("./modules/adapters/index.js");
+    const puente = await asegurarTasksDesdePlan(root, m[1], async (prompt) => {
+      const r = await spawn(root, prompt, { maxChars: 2000, timeoutMs: 60000 });
+      if (!r.ok) throw new Error(r.error ?? "proveedor sin respuesta");
+      return r.text ?? "";
+    });
+    if (!puente.ok) return { code: 2, msg: `build: ${puente.error}` };
+  }
   const { AgentOrchestrator } = await import("./orchestrator/orchestrator.js");
   const { reanudarBuild } = await import("./orchestrator/resume.js");
   const { generarCodigoLLM } = await import("./nodes/coder-llm.js");
