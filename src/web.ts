@@ -1661,6 +1661,14 @@ export function startWeb(root: string, port: number): {port:number;close:()=>voi
       // Run
       if(pathname==="/api/run"){await handleRun(root,req,res);return;}
 
+      // Build stream (mismo handler que el servidor dedicado, con el proveedor configurado)
+      if(req.method==="GET" && pathname==="/api/build/stream"){
+        const { manejarBuildStream } = await import("./server/build-events.js");
+        const { generarCodigoLLM } = await import("./nodes/coder-llm.js");
+        manejarBuildStream(root,req,res,(ruta,spec)=>generarCodigoLLM(root,ruta,spec));
+        return;
+      }
+
       // Verify (con captura browser opcional)
       if(pathname==="/api/verify" && req.method==="POST"){await handleVerify(root,req,res);return;}
       if(pathname==="/api/trazas" && req.method==="GET"){handleTrazas(root,req,res);return;}
