@@ -396,27 +396,40 @@ export function construirClarify(spec: string, respuestas: string[]): { code: nu
 
 export async function cmdClarify(root: string, specArg?: string): Promise<void> {
   const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
-  const { extraerMarcas, formatearPregunta, aplicarRespuesta, MAX_PREGUNTAS } = await import("./modules/clarify/index.js");
+  const { extraerMarcas, formatearPregunta, aplicarRespuesta, proponerPreguntas, MAX_PREGUNTAS } = await import("./modules/clarify/index.js");
   if (!specArg) { console.error("uso: axiom clarify <spec> (p. ej. axiom clarify .speckit/build.md)"); process.exit(2); }
   const p = specArg.startsWith("/") ? specArg : `${root}/${specArg}`;
   if (!existsSync(p)) { console.error(`clarify: spec no encontrada: ${specArg}`); process.exit(2); }
   let spec = readFileSync(p, "utf8");
-  const marcas = extraerMarcas(spec).slice(0, MAX_PREGUNTAS);
-  if (!marcas.length) { console.log("clarify: sin marcas [NEEDS CLARIFICATION], nada que preguntar"); return; }
+  // Sin marcas, detección propia: el proveedor propone (UNA llamada).
+  // Sin preguntas útiles no se toca nada.
+  let preguntas = extraerMarcas(spec).slice(0, MAX_PREGUNTAS);
+  let auto = false;
+  if (!preguntas.length) {
+    const { spawn } = await import("./modules/adapters/index.js");
+    preguntas = await proponerPreguntas(spec, async (prompt) => {
+      const r = await spawn(root, prompt, { maxChars: 2000, timeoutMs: 60000 });
+      if (!r.ok) throw new Error(r.error ?? "proveedor sin respuesta");
+      return r.text ?? "";
+    });
+    if (!preguntas.length) { console.log("clarify: sin marcas y sin ambigüedad detectada, nada que preguntar"); return; }
+    auto = true;
+    console.log(`clarify: sin marcas; el proveedor detectó ${preguntas.length} ambigüedad(es)`);
+  }
   const { createInterface } = await import("node:readline");
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const preguntar = (texto: string): Promise<string> => new Promise((res) => rl.question(texto, res));
+  const pedir = (texto: string): Promise<string> => new Promise((res) => rl.question(texto, res));
   try {
-    for (let i = 0; i < marcas.length; i++) {
-      console.log(formatearPregunta(marcas[i], i + 1, marcas.length));
-      const r = await preguntar("Respuesta: ");
-      spec = aplicarRespuesta(spec, marcas[i], r).markdown;
+    for (let i = 0; i < preguntas.length; i++) {
+      console.log(formatearPregunta(preguntas[i], i + 1, preguntas.length));
+      const r = await pedir("Respuesta: ");
+      spec = aplicarRespuesta(spec, preguntas[i], r).markdown;
     }
   } finally {
     rl.close();
   }
   writeFileSync(p, spec);
-  const resto = extraerMarcas(spec).length;
+  const resto = auto ? 0 : extraerMarcas(spec).length;
   console.log(`clarify: listo (${resto} marca(s) restante(s)${resto ? ", corre de nuevo o edita a mano" : ""})`);
 }
 
