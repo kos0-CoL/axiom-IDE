@@ -1,6 +1,6 @@
 // Comandos axiom: toda la lógica antes en cli.ts (composition root delegado).
 // Reciben root explícito; cli.ts solo parsea args y despacha.
-import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { addConsumo, getConsumo, listBloqueos, listTrazas, listUsos, openDb, recordBloqueo, recordUso } from "./store.js";
@@ -15,6 +15,7 @@ import { archivosFueraDeAllow, asegurarColumnaArchivos, validarArchivos } from "
 import { renderOrquestacion, renderTrabajo, datosOrquestacion, datosTrabajo } from "./ui.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, relative, sep } from "node:path";
 import { crear, evaluar, rollback, marcarEstable, listar, remove, existeComp, existeNombre, diff as diffComp, comparables, guardarComparativa, guardarBateria, verBateria, listarBaterias, borrarBateria, bateriaPorDefecto } from "./components.js";
@@ -638,9 +639,99 @@ export async function cmdCompareComp(root: string, nombre?: string, cmdStr?: str
   return `compare ${nombre} [batería ${origen}]: [${cand.ver} exit=${cd.code} vs ${estable.ver} exit=${est.code}] ${veredicto}\n- estable out=${corta(est.out)}\n- candidata out=${corta(cd.out)}`;
 }
 
+function masNuevoSrc(dir: string, stampMtime: number): string | null {
+  // Recorrido iterativo: primer .ts con mtime posterior al sello, o null.
+  try {
+    const pila = [dir];
+    while (pila.length > 0) {
+      const actual = pila.pop() as string;
+      let entradas: { name: string; isDirectory(): boolean; isFile(): boolean }[];
+      try {
+        entradas = readdirSync(actual, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entradas) {
+        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+        const full = join(actual, e.name);
+        if (e.isDirectory()) {
+          pila.push(full);
+        } else if (e.isFile() && e.name.endsWith(".ts")) {
+          try {
+            if (statSync(full).mtimeMs > stampMtime) return relative(dir, full);
+          } catch {
+            continue;
+          }
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function distDesactualizado(): { stale: boolean; motivo: string } {
+  // Compara la huella de compilación (dist/.build.json) con src/: si algún
+  // .ts es más nuevo que el build, el dist que sirve este proceso va por
+  // detrás y el síntoma típico es el críptico
+  // `... does not provide an export named ...`. Devuelve el motivo para que
+  // cmdServe pueda auto-repararse (reconstruir y reiniciar solo).
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const stampPath = join(here, ".build.json");
+    if (!existsSync(stampPath)) {
+      return { stale: true, motivo: "dist sin huella de compilación" };
+    }
+    let stampMtime = 0;
+    try {
+      stampMtime = statSync(stampPath).mtimeMs;
+    } catch {
+      return { stale: false, motivo: "" };
+    }
+    // dist/*.js -> ../src/*.ts respecto al repo.
+    const repoSrc = join(here, "..", "src");
+    const masNuevo = masNuevoSrc(repoSrc, stampMtime);
+    if (masNuevo) {
+      return { stale: true, motivo: `dist desactualizado (${masNuevo} es más nuevo que el build)` };
+    }
+    return { stale: false, motivo: "" };
+  } catch {
+    return { stale: false, motivo: "" };
+  }
+}
+
 export function cmdServe(root: string, portArg?: string): void {
   const port = portArg ? parseInt(portArg, 10) : 8787;
   if (!Number.isInteger(port) || port < 1 || port > 65535) { console.error("puerto inválido"); process.exit(1); }
+  // Auto-reparación para usuarios no técnicos: si el dist va por detrás de
+  // src/, se reconstruye solo y se reinicia sobre el código fresco. El
+  // usuario solo ve una línea de "reconstruyendo" y el servidor levanta.
+  // AXIOM_SERVE_REBUILT evita un bucle si el rebuild no deja huella.
+  if (!process.env.AXIOM_SERVE_REBUILT) {
+    const { stale, motivo } = distDesactualizado();
+    if (stale) {
+      console.error(`axiom serve: ${motivo} — reconstruyendo solo, un momento...`);
+      try {
+        const here = dirname(fileURLToPath(import.meta.url));
+        const repoRoot = join(here, "..");
+        const r = spawnSync("npm", ["run", "build"], { cwd: repoRoot, stdio: "inherit", timeout: 240000 });
+        if (r.status === 0) {
+          console.error("axiom serve: reconstruido — reiniciando sobre el código fresco...");
+          const cliPath = join(here, "cli.js");
+          const hijo = spawn(process.execPath, [cliPath, "--root", root, "serve", String(port)], {
+            stdio: "inherit",
+            env: { ...process.env, AXIOM_SERVE_REBUILT: "1" },
+          });
+          hijo.on("exit", (code) => process.exit(code ?? 0));
+          return;
+        }
+        console.error("axiom serve: la reconstrucción automática falló — arranco igual, pero si ves `does not provide an export named`, avísame.");
+      } catch {
+        console.error("axiom serve: no pude reconstruir solo — arranco igual con lo que hay.");
+      }
+    }
+  }
   startWeb(root, port);
   const keep = setInterval(() => {}, 1000);
   const close = () => { clearInterval(keep); process.exit(0); };

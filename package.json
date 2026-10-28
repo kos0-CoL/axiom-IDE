@@ -7,7 +7,8 @@
     "axiom": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/stamp-build.mjs",
+    "prestart": "npm run build",
     "start": "node dist/cli.js",
     "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/*.test.js && npm run check:seeds",
     "check:seeds": "node scripts/check-seeds.mjs",

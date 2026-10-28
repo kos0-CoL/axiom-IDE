@@ -4,7 +4,7 @@
   "axiom": "^0.9",
   "scope": "global",
   "default": false,
-  "description": "Inventario de controles de seguridad: skills del catálogo (seg-*, policy, sandbox), política global (tools/techo) y overrides de skills/<id>/SKILL.md del proyecto. Solo lectura.",
+  "description": "Inventario editable de controles de seguridad: skills del catálogo (seg-*, policy, sandbox), política global (tools/techo) y overrides de skills/<id>/SKILL.md del proyecto. Clic en un skill edita su SKILL.md; clic en politica-global edita tools/techo.",
   "contracts": ["security.controles"],
   "transports": ["cli", "web"],
   "patterns": ["fail-closed", "single-source"],

@@ -213,8 +213,26 @@ const casos = [
       }
       if (n === 0) return { ok: false, detalle: "ningún módulo exporta datosModulo" };
       return { ok: fallos.length === 0, detalle: fallos.length ? fallos.join(" · ") : `${n} módulo(s) con contrato ok` };
+      },
     },
-  },
+    {
+      id: "seguridad-detalle",
+      grupo: "contratos",
+      async ejecutar(ctx) {
+        const mod = await import(pathToFileURL(join(raiz, "dist", "modules", "security", "index.js")).href);
+        if (typeof mod.detalleModulo !== "function" || typeof mod.guardarDetalleModulo !== "function") {
+          return { ok: false, detalle: "security no expone detalle editable" };
+        }
+        const d = mod.detalleModulo(ctx.root, "politica-global");
+        if (!d.ok) return { ok: false, detalle: `detalle politica-global: ${d.error}` };
+        const g = mod.guardarDetalleModulo(ctx.root, {
+          id: "politica-global",
+          cambios: { terminal: "quizás", delega: "no", techo: "3:100000:500" },
+        });
+        if (g.ok) return { ok: false, detalle: "aceptó terminal inválido (debería rechazar sin escribir)" };
+        return { ok: true, detalle: "detalle politica-global ok · rechazo fail-closed de terminal inválido" };
+      },
+    },
   {
     id: "verify-inexistente",
     grupo: "fail-closed",

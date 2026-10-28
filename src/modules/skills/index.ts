@@ -304,7 +304,8 @@ export function textoSkills(root: string): string {
 export interface CampoDetalleSkill {
   k: string;
   etiqueta: string;
-  tipo: "texto" | "area";
+  tipo: "texto" | "area" | "opciones";
+  opciones?: string[];
   ayuda: string;
   valor: string;
 }
