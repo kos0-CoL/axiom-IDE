@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SKILLS, skillMarkdown } from "../agents/skills.js";
+import { parseFrontmatterSkill, serializarSkillEstandar } from "./frontmatter.js";
 
 export const SKILL_ID_OK = /^[a-z][a-z0-9-]{0,63}$/;
 export const MAX_DESCRIPCION = 160;
@@ -106,6 +107,18 @@ function leerArchivo(root: string, id: string): ArchivoSkill | undefined {
   try {
     const crudo = readFileSync(p, "utf8");
     if (crudo.length > 200_000) return { crudo: "", error: "SKILL.md demasiado grande (máx 200000)" };
+    // Formato estándar primero (frontmatter name/description); si no hay
+    // frontmatter, fallback al parser viejo. Las skills viejas se siguen
+    // leyendo sin cambios.
+    if (/^---\r?\n/.test(crudo)) {
+      const fm = parseFrontmatterSkill(crudo);
+      const out: ArchivoSkill = { crudo };
+      if (fm.descripcion) out.descripcion = fm.descripcion;
+      if (fm.cuerpo) out.cuerpo = fm.cuerpo;
+      else out.error = "SKILL.md sin cuerpo utilizable tras el frontmatter";
+      if (fm.error && !out.error) out.error = undefined;
+      return out;
+    }
     const parse = parseSkillMd(crudo);
     const out: ArchivoSkill = { crudo };
     if (parse.descripcion) out.descripcion = parse.descripcion;
@@ -128,6 +141,23 @@ function idsEnDisco(root: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** Scripts deterministas de la skill (skills/<id>/scripts/ o raíz): los corre el runner. */
+export function listarScriptsSkill(root: string, id: string): string[] {
+  const dirs = [join(root, CARPETA, id, "scripts"), join(root, CARPETA, id)];
+  for (const d of dirs) {
+    try {
+      const files = readdirSync(d, { withFileTypes: true })
+        .filter((x) => x.isFile() && /^[-a-z0-9_]+\.(sh|mjs|js)$/.test(x.name))
+        .map((x) => x.name)
+        .sort();
+      if (files.length) return files.map((f) => (d.endsWith("scripts") ? `scripts/${f}` : f));
+    } catch {
+      /* sin carpeta: se prueba la siguiente */
+    }
+  }
+  return [];
 }
 
 /** Carpetas en skills/ cuyo nombre no es un id válido: no se cargan (no se adivinan). */
@@ -225,7 +255,7 @@ export function guardarSkill(root: string, id: string, datos: { descripcion: unk
   if (cuerpo.length > MAX_CUERPO) return { ok: false, error: `cuerpo demasiado largo (máx ${MAX_CUERPO})` };
   try {
     mkdirSync(join(root, CARPETA, id), { recursive: true });
-    writeFileSync(rutaSkill(root, id), skillMarkdown({ id, descripcion, cuerpo }));
+    writeFileSync(rutaSkill(root, id), serializarSkillEstandar({ name: id, descripcion, cuerpo }));
     return { ok: true, msg: `skill ${id} guardado`, ruta: rutaRelativa(id) };
   } catch (e) {
     return { ok: false, error: `no se pudo escribir ${rutaRelativa(id)}: ${e instanceof Error ? e.message : String(e)}` };
@@ -358,10 +388,10 @@ export function detalleModulo(root: string, id?: string): ResultadoDetalleSkill 
       ],
       avanzado: {
         titulo: "Modo avanzado — archivo SKILL.md",
-        ayuda: "El markdown completo tal como queda en el archivo. Al guardar se normaliza al formato de Axiom (título, objetivo y cuerpo).",
+        ayuda: "El markdown completo tal como queda en el archivo. Al guardar se normaliza al formato estándar (frontmatter name/description).",
         boton: "Guardar SKILL.md",
       },
-      nota: `Origen: ${origen}. Ruta: ${s.ruta}. Guardar crea o actualiza el archivo del proyecto, que sobreescribe el catálogo y es exactamente lo que recibe el prompt.`,
+      nota: `Origen: ${origen}. Ruta: ${s.ruta}. Guardar crea o actualiza el archivo del proyecto en formato estándar (frontmatter), que sobreescribe el catálogo y es exactamente lo que recibe el prompt.`,
     },
   };
 }
@@ -378,12 +408,21 @@ export function guardarDetalleModulo(
   let cuerpo: unknown;
   if (entrada.bruto !== undefined) {
     if (typeof entrada.bruto !== "string") return { ok: false, error: "bruto debe ser texto markdown" };
-    const p = parseSkillMd(entrada.bruto);
-    if (!p.descripcion || !p.cuerpo) {
-      return { ok: false, error: "el SKILL.md necesita descripción y cuerpo: conserva «# SKILL: <id>», «Objetivo: …» y el texto de la skill" };
+    if (/^---\r?\n/.test(entrada.bruto)) {
+      const fm = parseFrontmatterSkill(entrada.bruto);
+      if (!fm.descripcion || !fm.cuerpo) {
+        return { ok: false, error: "el SKILL.md necesita frontmatter con description y cuerpo tras el cierre" };
+      }
+      descripcion = fm.descripcion;
+      cuerpo = fm.cuerpo;
+    } else {
+      const p = parseSkillMd(entrada.bruto);
+      if (!p.descripcion || !p.cuerpo) {
+        return { ok: false, error: "el SKILL.md necesita descripción y cuerpo: conserva «# SKILL: <id>», «Objetivo: …» y el texto de la skill" };
+      }
+      descripcion = p.descripcion;
+      cuerpo = p.cuerpo;
     }
-    descripcion = p.descripcion;
-    cuerpo = p.cuerpo;
   } else {
     const c = entrada.cambios;
     if (!c || typeof c !== "object" || Array.isArray(c)) return { ok: false, error: "cambios (objeto) o bruto (markdown) requerido" };

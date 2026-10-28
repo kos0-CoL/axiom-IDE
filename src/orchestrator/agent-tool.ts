@@ -3,7 +3,9 @@
 // entrada estrecha (tarea), salida pequeña acotada, maxTurns/timeout
 // propios, autorización en el broker (deny por defecto) y eventos con
 // parent_call_id para trazar padre→hijo. El prompt nunca autoriza.
-import { autorizarUso } from "../modules/agents/ejecucion.js";
+import { autorizarUso, construirPromptAgente, modeloDeAgente } from "../modules/agents/ejecucion.js";
+import { loadAgents } from "../modules/agents/config.js";
+import { spawn, type SpawnResult } from "../adapters.js";
 import type { ToolContract } from "../contracts.js";
 export interface VeredictoTool {
   decision: "allow" | "deny" | "ask";
@@ -67,6 +69,48 @@ export function autorizarPorBroker(root: string, por = "agent-tool"): (tool: str
  * si no es allow, fail closed. `ejecutar` es el especialista real (inyectado,
  * con su propio presupuesto); el padre sintetiza con `sintetizar`.
  */
+export interface OpcionesRoster {
+  maxTurns?: number;
+  timeoutMs?: number;
+  /** Solo tests: sustituye el spawn real al LLM. */
+  spawnFn?: (prompt: string, model?: string) => Promise<SpawnResult> | SpawnResult;
+}
+
+/**
+ * Ejecutor real del especialista: lo carga del roster (fail closed si no
+ * existe o no está activo), construye su prompt con sus skills e
+ * instrucciones, y hace spawn con su modelo (o el global si hereda).
+ * Devuelve el texto del especialista para que el padre sintetice.
+ */
+export async function ejecutarConRoster(
+  root: string,
+  agenteId: string,
+  tarea: string,
+  opts: OpcionesRoster = {},
+): Promise<string> {
+  const r = loadAgents(root);
+  if (!r.ok) throw new Error(`ejecutarConRoster: ${r.error}`);
+  const agente = r.config.agentes.find((a) => a.id === agenteId);
+  if (!agente) throw new Error(`ejecutarConRoster: agente inexistente: ${agenteId} (fail closed)`);
+  if (agente.estado !== "activo") {
+    throw new Error(`ejecutarConRoster: agente no activo (${agente.estado}): ${agenteId} (fail closed)`);
+  }
+  if (!tarea?.trim()) throw new Error("ejecutarConRoster: tarea vacía");
+  const prompt = construirPromptAgente(
+    { ...agente, herramientas: agente.herramientas ?? [] },
+    tarea,
+    "agent-tool: subtarea delegada por el orquestador",
+    "agent-tool",
+    root,
+  );
+  const hacer = opts.spawnFn ?? ((p: string, m?: string) => spawn(root, p, m ? { model: m } : {}));
+  const s = await hacer(prompt, modeloDeAgente(agente));
+  if (!s.ok) throw new Error(`ejecutarConRoster: spawn falló (${agenteId}): ${s.error}`);
+  const texto = (s.text ?? "").trim();
+  if (!texto) throw new Error(`ejecutarConRoster: respuesta vacía (${agenteId})`);
+  return texto;
+}
+
 export async function invocarAgenteComoTool(
   def: AgenteToolDef,
   llamada: LlamadaAgenteTool,

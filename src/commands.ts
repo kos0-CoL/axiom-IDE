@@ -7,6 +7,8 @@ import { addConsumo, getConsumo, listBloqueos, listTrazas, listUsos, openDb, rec
 import { TaskContract } from "./contracts.js";
 import { SPEC_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE, VERIFICATION_TEMPLATE, OVERRIDES_README } from "./preset.js";
 import { check, decide } from "./broker.js";
+import { leerSkill } from "./skills.js";
+import { ejecutarScriptSkill } from "./modules/skills/runner.js";
 import { cicloImproductivo, checkTecho } from "./policy.js";
 import { huellaConfig, leerMarca, marcarRun, textoSnapshot } from "./runmark.js";
 import { asegurarExperience, registrarLeccion, textoExperiencia, proponerAjuste, textoPropuestas, verPropuesta, decidirPropuesta, estadoMemoria, compactarMemoria } from "./experience.js";
@@ -344,6 +346,28 @@ export async function construirBuild(
 
 export async function cmdBuild(root: string, specArg?: string, resume = false): Promise<void> {
   const r = await construirBuild(root, specArg, resume);
+  const out = r.code === 0 ? console.log : console.error;
+  out(r.msg);
+  if (r.code !== 0) process.exit(r.code);
+}
+
+// Núcleo de `axiom skills run` sin process.exit: ejecuta un script
+// determinista de la skill con el runner acotado (timeout, cwd fijado,
+// entorno filtrado). Destructivos exigen dryRun.
+export interface ResultadoSkillsRun { code: number; msg: string }
+
+export function construirSkillsRun(root: string, id?: string, script?: string, dryRun = false): ResultadoSkillsRun {
+  if (!id || !script) return { code: 2, msg: "uso: axiom skills run <id> <script> [--dry-run]" };
+  const s = leerSkill(root, id);
+  if (!s.ok) return { code: 2, msg: s.error };
+  const r = ejecutarScriptSkill(root, id, script, { dryRun });
+  const cabeza = `skill ${id} · ${script} · sha ${r.sha256.slice(0, 8)} · ${r.ms}ms`;
+  if (!r.ok) return { code: 1, msg: `${cabeza}\nERROR: ${r.error ?? "falló"}\n${r.salida}` };
+  return { code: 0, msg: `${cabeza}${r.dryRun ? " [dry-run]" : ""}\n${r.salida}` };
+}
+
+export function cmdSkillsRun(root: string, id?: string, script?: string, dryRun = false): void {
+  const r = construirSkillsRun(root, id, script, dryRun);
   const out = r.code === 0 ? console.log : console.error;
   out(r.msg);
   if (r.code !== 0) process.exit(r.code);

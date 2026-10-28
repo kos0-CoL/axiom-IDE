@@ -187,7 +187,7 @@ test("el editor recibe el contenido crudo del archivo", () => {
     const leido = leerSkill(base, "mi-skill");
     assert.equal(leido.ok, true);
     if (leido.ok) {
-      assert.match(leido.skill.crudo ?? "", /# SKILL: mi-skill/);
+      assert.match(leido.skill.crudo ?? "", /---\nname: mi-skill\ndescription: d/);
       assert.equal(leido.skill.ruta, "skills/mi-skill/SKILL.md");
       assert.ok(readFileSync(join(base, "skills", "mi-skill", "SKILL.md"), "utf8").includes("c"));
     }
@@ -234,7 +234,7 @@ test("el modo avanzado acepta el markdown del usuario y lo normaliza", () => {
     const r = guardarDetalleSkill(base, { id: "nuevo", bruto: md });
     assert.ok(r.ok, r.ok ? "" : r.error);
     assert.equal(cuerpoEfectivo(base, "nuevo"), "Haz la cosa.");
-    assert.match(readFileSync(join(base, "skills", "nuevo", "SKILL.md"), "utf8"), /^# SKILL: nuevo/);
+    assert.match(readFileSync(join(base, "skills", "nuevo", "SKILL.md"), "utf8"), /^---\nname: nuevo\ndescription: prueba/);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // cli.ts — composition root delgado: parsea --root/args y despacha a commands.ts.
 import { resolve } from "node:path";
-import { flagNum, flagStr, cmdInit, cmdSpec, cmdPlan, cmdTasks, cmdVerify, cmdDecide, cmdRun, cmdBuild, cmdStatus, cmdMemory, cmdValidate, cmdCheck, cmdUi, cmdServe, cmdValidateTokens, cmdValidateOpenApi, cmdCycle, cmdEvalComp, cmdRemoveComp, cmdDiffComp, cmdCompareComp, cmdBatterySet, cmdBatteryShow, cmdBatteryList, cmdBatteryClear, cmdSpawn, cmdExperiencia, cmdProponerHarness, cmdPropuestasHarness, cmdVerPropuesta, cmdDecidirPropuesta, cmdSnapshot, cmdModuloDatos, cmdModuloCrear, cmdModuloRegen, cmdCompat, crear, rollback, marcarEstable, listar } from "./commands.js";
+import { flagNum, flagStr, cmdInit, cmdSpec, cmdPlan, cmdTasks, cmdVerify, cmdDecide, cmdRun, cmdBuild, cmdSkillsRun, cmdStatus, cmdMemory, cmdValidate, cmdCheck, cmdUi, cmdServe, cmdValidateTokens, cmdValidateOpenApi, cmdCycle, cmdEvalComp, cmdRemoveComp, cmdDiffComp, cmdCompareComp, cmdBatterySet, cmdBatteryShow, cmdBatteryList, cmdBatteryClear, cmdSpawn, cmdExperiencia, cmdProponerHarness, cmdPropuestasHarness, cmdVerPropuesta, cmdDecidirPropuesta, cmdSnapshot, cmdModuloDatos, cmdModuloCrear, cmdModuloRegen, cmdCompat, crear, rollback, marcarEstable, listar } from "./commands.js";
 import { statusText, notifyApproval, handleCallback, bloqueosText, consumoText, allowChatId, unallowChatId, setExpiracion, setEnabled as tgEnabled, configText, notifyChat, runPolling, tokenFromEnv, setWebhook, sendMessage } from "./telegram.js";
 import { getSecret } from "./secrets.js";
 const tgToken = (root: string): string | undefined => getSecret(root, "AXIOM_TELEGRAM_BOT_TOKEN") ?? tokenFromEnv();
@@ -204,8 +204,10 @@ else if (cmd === "skills") {
     const r = borrarSkill(root, rest[1] ?? "");
     console.log(r.ok ? r.msg : r.error);
     if (!r.ok) process.exit(2);
+  } else if (rest[0] === "run") {
+    cmdSkillsRun(root, rest[1], rest[2], rest.includes("--dry-run"));
   } else if (rest[0] && rest[0] !== "list") {
-    console.error("uso: axiom skills [ver|borrar <id>]"); process.exit(2);
+    console.error("uso: axiom skills [list|ver|borrar <id>|run <id> <script> [--dry-run]]"); process.exit(2);
   } else {
     console.log(textoSkills(root));
   }

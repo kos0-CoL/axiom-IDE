@@ -6,11 +6,13 @@
 // pausan el build, persisten lo avanzado (la spec siempre se escribe tras
 // cada éxito) y emiten el evento de excepción. Usa fs síncrono: cada llamada
 // abre y cierra su descriptor, no queda nada abierto al terminar.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { leerChecklist, marcarHecha } from "../spec/checklist.js";
 import { escribirArchivo } from "../server/filesystem.js";
 import { validarCodigo } from "../nodes/validator.js";
 import { componerAnteFalloAsync, sanearCodigo, type PropuestaVarianteAsync } from "./variantes.js";
+import { escribirManifiesto, registrarArtefacto } from "../server/manifiesto.js";
+import { runIdParaSpec } from "../server/run-log.js";
 
 export type TipoEvento = "status" | "file_start" | "file_success" | "error" | "complete";
 
@@ -41,9 +43,27 @@ export interface DepsOrquestador {
    * coder (fresh sample) + saneado local barato del código fallido.
    */
   construirVariantes?: (ruta: string, codigo: string, motivo: string, spec: string) => PropuestaVarianteAsync[];
+  /**
+   * Trazabilidad por defecto: cada file_success queda en
+   * .runs/<run>/artefactos/ y al completar se escribe el manifiesto.
+   * `false` lo apaga (tests que no quieren rastro en disco).
+   */
+  artefactos?: boolean;
+  version?: string;
 }
 
 const MAX_FALLOS_DEFECTO = 3;
+
+function versionPaquete(root: string): string {
+  try {
+    const p = `${root}/package.json`;
+    if (!existsSync(p)) return "dev";
+    const j = JSON.parse(readFileSync(p, "utf8")) as { version?: unknown };
+    return typeof j.version === "string" ? j.version : "dev";
+  } catch {
+    return "dev";
+  }
+}
 
 export class AgentOrchestrator {
   private fallos: Record<string, number> = {};
@@ -74,6 +94,16 @@ export class AgentOrchestrator {
       }
       const siguiente = leerChecklist(spec).find((t) => !t.hecha);
       if (!siguiente) {
+        if (this.deps.artefactos !== false) {
+          try {
+            escribirManifiesto(this.root, runIdParaSpec(this.specRel), {
+              version: this.deps.version ?? versionPaquete(this.root),
+              tests: { pasados: procesados, fallados: Object.keys(this.fallos).length },
+            });
+          } catch {
+            /* el manifiesto nunca tumba el build */
+          }
+        }
         this.emitir({ type: "complete", estado: "completo", mensaje: "sin tareas pendientes: spec finalizada" });
         return { estado: "completo", procesados, fallos: { ...this.fallos } };
       }
@@ -138,6 +168,13 @@ export class AgentOrchestrator {
       writeFileSync(`${this.root}/${this.specRel}`, marcado.markdown);
       delete this.fallos[ruta];
       procesados++;
+      if (this.deps.artefactos !== false) {
+        try {
+          registrarArtefacto(this.root, runIdParaSpec(this.specRel), ruta, codigo, "orchestrator");
+        } catch {
+          /* el registro nunca tumba el build */
+        }
+      }
       this.emitir({ type: "file_success", ruta, mensaje: `${ruta} escrito y marcado [X]` });
     }
   }
