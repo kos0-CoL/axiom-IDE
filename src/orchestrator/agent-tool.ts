@@ -74,6 +74,8 @@ export interface OpcionesRoster {
   timeoutMs?: number;
   /** Solo tests: sustituye el spawn real al LLM. */
   spawnFn?: (prompt: string, model?: string) => Promise<SpawnResult> | SpawnResult;
+  /** Tool-loop (leer/delegar a mitad de razonamiento). Default true; false = un solo spawn. */
+  loop?: boolean;
 }
 
 /**
@@ -104,6 +106,19 @@ export async function ejecutarConRoster(
     root,
   );
   const hacer = opts.spawnFn ?? ((p: string, m?: string) => spawn(root, p, m ? { model: m } : {}));
+  // Loop solo si el agente declara herramientas loop y no se optó fuera;
+  // sin bloques tool equivale al solo-spawn de siempre.
+  if (opts.loop !== false) {
+    const { ejecutarAgenteConTools } = await import("../modules/agents/ejecucion.js");
+    const r = await ejecutarAgenteConTools(
+      root,
+      { ...agente, herramientas: agente.herramientas ?? [] },
+      prompt,
+      { maxTurnos: opts.maxTurns, falsos: opts.spawnFn ? { spawn: hacer } : {} },
+    );
+    if (!r.texto.trim()) throw new Error(`ejecutarConRoster: respuesta vacía (${agenteId})`);
+    return r.texto;
+  }
   const s = await hacer(prompt, modeloDeAgente(agente));
   if (!s.ok) throw new Error(`ejecutarConRoster: spawn falló (${agenteId}): ${s.error}`);
   const texto = (s.text ?? "").trim();

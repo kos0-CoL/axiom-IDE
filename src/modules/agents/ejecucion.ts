@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { check, consumirAprobacion } from "../../broker.js";
 import { effectiveAllow } from "../../policy.js";
+import { correrLoop, leerArchivoSandbox, type DepsLoop, type NombreToolLoop, type OpcionesLoop } from "./tool-loop.js";
 import { declaracionDeHerramienta, normalizarHerramienta } from "./declaracion.js";
 import { DELEGA_CONTRACT } from "./handoff.js";
 import type { ToolContract } from "../../contracts.js";
@@ -171,6 +172,55 @@ async function ejecutarAgente(root: string, agente: AgenteEjecutable, prompt: st
   return spawn(root, prompt, propio ? { model: propio } : {});
 }
 
+// Herramientas con ejecución real en v1 (el prompt solo lista estas dos;
+// `buscar` queda fuera hasta que el loop necesite red con aprobación).
+const TOOLS_LOOP: NombreToolLoop[] = ["leer", "delega"];
+
+const LEER_CONTRACT: ToolContract = {
+  name: "leer",
+  description: "Lee un archivo del workspace (solo lectura, acotado).",
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+
+/** Herramientas que este agente puede invocar a mitad de razonamiento. */
+export function herramientasLoop(agente: Pick<AgenteEjecutable, "herramientas">): NombreToolLoop[] {
+  const declaradas = new Set((agente.herramientas ?? []).map((h) => normalizarHerramienta(h.tool)));
+  return TOOLS_LOOP.filter((t) => declaradas.has(t) && (agente.herramientas ?? []).some((h) => normalizarHerramienta(h.tool) === t && h.acceso !== "deny"));
+}
+
+export interface OpcionesAgenteTools extends OpcionesLoop {
+  /** Solo tests: sustituye spawn/ejecutores reales. Parcial (merge con reales). */
+  falsos?: Partial<Pick<DepsLoop, "spawn" | "autorizar" | "leer" | "delegar">>;
+}
+
+/**
+ * Ejecuta un agente con tool-loop: puede leer y delegar a mitad de
+ * razonamiento, con cada llamada autorizada en el broker. Sin herramientas
+ * ofrecidas equivale a un solo spawn. Registra el consumo de cada turno.
+ */
+export async function ejecutarAgenteConTools(
+  root: string,
+  agente: AgenteEjecutable,
+  prompt: string,
+  opts: OpcionesAgenteTools = {},
+): Promise<{ texto: string; turnos: number; herramientas: number }> {
+  const ofrecidas = herramientasLoop(agente);
+  const corrida = `run ${agente.id}`;
+  const delegarReal = async (agenteId: string, tarea: string): Promise<string> => {
+    // Subagente de una pasada (sin loop anidado): tope hermanado, no recursivo.
+    const { ejecutarConRoster } = await import("../../orchestrator/agent-tool.js");
+    return ejecutarConRoster(root, agenteId, tarea, { loop: false });
+  };
+  const deps: DepsLoop = {
+    spawn: opts.falsos?.spawn ?? ((p: string, m?: string) => spawn(root, p, m ? { model: m } : {})),
+    autorizar: opts.falsos?.autorizar ?? ((tool, objetivo) => autorizarUso(root, agente.id, tool, tool === "leer" ? LEER_CONTRACT : DELEGA_CONTRACT, `${corrida}→${tool}:${objetivo}`)),
+    leer: opts.falsos?.leer ?? ((ruta) => leerArchivoSandbox(root, ruta)),
+    delegar: opts.falsos?.delegar ?? delegarReal,
+    registrarUso: (uso) => { try { addConsumo(root, uso.total, 1); recordUso(root, uso); } catch { /* el consumo nunca tumba el trabajo */ } },
+  };
+  return correrLoop(agente.id, prompt, ofrecidas, deps, { modelo: modeloDeAgente(agente), maxTurnos: opts.maxTurnos, maxPorTurno: opts.maxPorTurno, maxTotal: opts.maxTotal });
+}
+
 // Encuentra el siguiente agente al que delegar según el grafo. Si el trabajo
 // necesita una herramienta (p. ej. `editar`), se prefiere un destino que la
 // declare: si no, el broker negaría la corrida entera (no declarado = denegado).
@@ -237,21 +287,20 @@ export async function ejecutarTareaGrafo(
     return { ok: false, verdict: "error", trabajo: "", relPath: "", error: `run bloqueado por el broker: ${bloqueos.join("; ")}` };
   }
 
-  // Paso 2: El delegado hace el trabajo
+  // Paso 2: El delegado hace el trabajo (con tool-loop: puede leer y
+  // delegar a mitad de razonamiento; sin bloques tool es un solo spawn).
   const promptTrabajo = construirPromptAgente(delegado, `${taskId} — ${taskTitle}`, scenario, specTitulo, root);
-  const trabajoResult = await ejecutarAgente(root, delegado, promptTrabajo);
-  
-  if (!trabajoResult.ok) {
-    return { ok: false, verdict: "error", trabajo: "", relPath: "", error: `Trabajo fallido: ${trabajoResult.error}` };
+  let trabajoTexto: string;
+  try {
+    trabajoTexto = (await ejecutarAgenteConTools(root, delegado, promptTrabajo)).texto;
+  } catch (e) {
+    return { ok: false, verdict: "error", trabajo: "", relPath: "", error: `Trabajo fallido: ${e instanceof Error ? e.message : e}` };
   }
-
-  const trabajoTexto = trabajoResult.text ?? "";
-  if (trabajoResult.uso) { addConsumo(root, trabajoResult.uso.total, 1); recordUso(root, trabajoResult.uso); }
 
   // Guardar artefacto de trabajo
   const relPath = `specs/active/${specId}/trabajo-${taskId}.md`;
   mkdirSync(activeDir(root, specId), { recursive: true });
-  writeFileSync(join(activeDir(root, specId), `trabajo-${taskId}.md`), `# Trabajo ${taskId}\n\n**agente:** ${delegado.id}\n**modelo:** ${trabajoResult.model}\n**juez:** pendiente\n**fecha:** ${new Date().toISOString()}\n\n${trabajoTexto}\n`);
+  writeFileSync(join(activeDir(root, specId), `trabajo-${taskId}.md`), `# Trabajo ${taskId}\n\n**agente:** ${delegado.id}\n**modelo:** ${modeloDeAgente(delegado) ?? "hereda-proveedor"}\n**juez:** pendiente\n**fecha:** ${new Date().toISOString()}\n\n${trabajoTexto}\n`);
 
   // Paso 3: Juez (puede ser nodo-review o el mismo agente)
   let juezId = encontrarDelegado(grafo, delegadoId, "review");
