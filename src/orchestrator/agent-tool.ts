@@ -3,6 +3,8 @@
 // entrada estrecha (tarea), salida pequeña acotada, maxTurns/timeout
 // propios, autorización en el broker (deny por defecto) y eventos con
 // parent_call_id para trazar padre→hijo. El prompt nunca autoriza.
+import { autorizarUso } from "../modules/agents/ejecucion.js";
+import type { ToolContract } from "../contracts.js";
 export interface VeredictoTool {
   decision: "allow" | "deny" | "ask";
   motivo?: string;
@@ -34,6 +36,31 @@ export interface ResultadoAgenteTool {
 const MAX_TURNOS_DEFECTO = 3;
 const TIMEOUT_DEFECTO = 30000;
 const MAX_SALIDA = 4000;
+
+// La tool no escribe ni ejecuta por sí misma: devuelve texto acotado que el
+// padre sintetiza. Por eso el contrato es readOnly (riesgo bajo, la política
+// lo auto-permite) y lo que manda es la declaración del agente en el roster:
+// sin `tool=allow|ask` declarado, el broker deniega (fail closed).
+const CONTRATO_TOOL: ToolContract = {
+  name: "agent-tool",
+  description:
+    "Delega una subtarea estrecha a un especialista del roster; devuelve texto acotado que el padre sintetiza, sin escribir ni ejecutar.",
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+
+/**
+ * Cableado real al broker: resuelve la declaración del especialista en
+ * agents.config.json y cruza política global ∧ proyecto ∧ agente vía
+ * autorizarUso (consume una aprobación vigente si la hay). Devuelve la
+ * función `autorizar(tool, agenteId)` que pide invocarAgenteComoTool.
+ * Sin declaración o sin política que lo cubra: deny (fail closed).
+ */
+export function autorizarPorBroker(root: string, por = "agent-tool"): (tool: string, agenteId: string) => VeredictoTool {
+  return (tool: string, agenteId: string) => {
+    const r = autorizarUso(root, agenteId, tool, { ...CONTRATO_TOOL, name: tool }, por);
+    return { decision: r.decision, motivo: r.id ? `${r.motivo} (aprobación ${r.id})` : r.motivo };
+  };
+}
 
 /**
  * Ejecuta al especialista como tool. `autorizar` es el broker (no el prompt):
