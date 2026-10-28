@@ -9,9 +9,9 @@ por fallo para no quemar tokens. Reutiliza `src/nodes/*`,
 `src/experience.ts` y `src/orchestrator/`.
 
 ## Criterios de aceptación
-- [ ] src/orchestrator/variantes.ts
-- [ ] test/propose-probe-compose.test.ts
-- [ ] scripts/demo-variantes.mjs
+- [X] src/orchestrator/variantes.ts
+- [X] test/propose-probe-compose.test.ts
+- [X] scripts/demo-variantes.mjs
 
 ## Notas de verificación (no son archivos: el harness las comprueba al cerrar)
 - Ante fallo de validación: propone 2 variantes, las prueba, compone la que

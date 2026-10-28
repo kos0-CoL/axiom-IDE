@@ -8,9 +8,9 @@ padre sintetiza. La autorización vive en el broker, no en el prompt.
 Reutiliza `src/broker.ts`, `src/modules/agents/*` y `src/orchestrator/`.
 
 ## Criterios de aceptación
-- [ ] src/orchestrator/agent-tool.ts
-- [ ] test/agent-as-tool.test.ts
-- [ ] scripts/demo-agent-tool.mjs
+- [X] src/orchestrator/agent-tool.ts
+- [X] test/agent-as-tool.test.ts
+- [X] scripts/demo-agent-tool.mjs
 
 ## Notas de verificación (no son archivos: el harness las comprueba al cerrar)
 - Registro: un especialista del roster se expone como tool con esquema de

@@ -9,11 +9,11 @@ scripts con límites. Reutiliza `src/modules/skills/index.ts` (lectura y
 guardado) sin tocar el núcleo.
 
 ## Criterios de aceptación
-- [ ] src/modules/skills/frontmatter.ts
-- [ ] src/modules/skills/runner.ts
-- [ ] test/skills-standard.test.ts
-- [ ] scripts/demo-skill-run.mjs
-- [ ] docs/skills-formato.md
+- [X] src/modules/skills/frontmatter.ts
+- [X] src/modules/skills/runner.ts
+- [X] test/skills-standard.test.ts
+- [X] scripts/demo-skill-run.mjs
+- [X] docs/skills-formato.md
 
 ## Notas de verificación (no son archivos: el harness las comprueba al cerrar)
 - El lector acepta skills viejas (sin frontmatter) y nuevas (con frontmatter).

@@ -8,9 +8,9 @@ reutilizable solo con revisión. Reutiliza `src/server/filesystem.ts`,
 `src/modules/skills/*` y lo construido en etapa 1.
 
 ## Criterios de aceptación
-- [ ] src/server/manifiesto.ts
-- [ ] test/artefactos.test.ts
-- [ ] scripts/demo-manifiesto.mjs
+- [X] src/server/manifiesto.ts
+- [X] test/artefactos.test.ts
+- [X] scripts/demo-manifiesto.mjs
 
 ## Notas de verificación (no son archivos: el harness las comprueba al cerrar)
 - Todo script ejecutado en un run queda con hash/origen/inputs registrados

@@ -8,10 +8,10 @@ idempotencia (at-least-once + efectos idempotentes; nunca exactly-once).
 Reutiliza `src/server/build-events.ts`, `src/orchestrator/` y `src/store.ts`.
 
 ## Criterios de aceptación
-- [ ] src/server/run-log.ts
-- [ ] src/orchestrator/resume.ts
-- [ ] test/resume.test.ts
-- [ ] scripts/demo-resume.mjs
+- [X] src/server/run-log.ts
+- [X] src/orchestrator/resume.ts
+- [X] test/resume.test.ts
+- [X] scripts/demo-resume.mjs
 
 ## Notas de verificación (no son archivos: el harness las comprueba al cerrar)
 - Cada evento lleva `run_id`, `seq` y payload reproducible; el log es JSONL
