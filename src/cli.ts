@@ -13,6 +13,7 @@ import type { TipoAccion } from "./modules/browser/sesion.js";
 import { createInterface } from "node:readline";
 import { listarModulos, moduloActivo, setModulo, setVista, textoModulos, textoSuperficie } from "./modulos.js";
 import { textoSkills, leerSkill, borrarSkill } from "./skills.js";
+import { fijarPrincipio, enmendarPrincipio, quitarPrincipio, textoConstitucion } from "./constitution.js";
 void listarModulos;
 
 const rawArgs = process.argv.slice(2);
@@ -248,10 +249,14 @@ else if (cmd === "comp" && rest[0] === "battery" && rest[1] === "clear") { const
 else if (cmd === "comp" && rest[0] === "stable") { console.log(marcarEstable(root, rest[1] ?? "", rest[2] ?? "")); }
 else if (cmd === "comp" && rest[0] === "rollback") { console.log(rollback(root, rest[1] ?? "")); }
 else if (cmd === "comp") { console.log(listar(root)); }
+else if (cmd === "constitution" && rest[0] === "principio") { const r = fijarPrincipio(root, rest[1] ?? "", rest.slice(2).join(" ")); console.log(r.msg); if (!r.ok) process.exit(2); }
+else if (cmd === "constitution" && rest[0] === "enmendar") { const r = enmendarPrincipio(root, rest[1] ?? "", rest.slice(2).join(" ")); console.log(r.msg); if (!r.ok) process.exit(2); }
+else if (cmd === "constitution" && rest[0] === "quitar") { const r = quitarPrincipio(root, rest[1] ?? ""); console.log(r.msg); if (!r.ok) process.exit(2); }
+else if (cmd === "constitution") { console.log(textoConstitucion(root)); }
 else if (cmd === "sandbox" && rest[0] === "spec") { console.log(sandboxSpec()); }
 else if (cmd === "serve") { cmdServe(root, rest[0]); }
 else if (cmd === "validate-tokens") { cmdValidateTokens(rest[0]); }
 else if (cmd === "validate-openapi") { cmdValidateOpenApi(rest[0]); }
 else if (cmd === "sandbox") { const ii = rest.indexOf("--image"); const img = ii >= 0 ? rest[ii + 1] : undefined; const userCmd = ii >= 0 ? rest.filter((_, i) => i !== ii && i !== ii + 1) : rest.slice(); const out = await sandboxRun(root, userCmd.length ? userCmd : ["echo", "sandbox-ok"], img ? { image: img } : {}); console.log(out.out); process.exit(out.code); }
 else if (cmd === "cycle") { cmdCycle(root, rest[0]); }
-else { console.log("uso: axiom [--root <dir>] <init|spec|plan|tasks|verify|run|build|check|approve|reject|cycle|comp|telegram|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi|sandbox> (build: [spec] [--resume]) (clarify: <spec>) (verify: pass|fail|error [--detalle] [--archivos]) (run: [--dry-run] [--agente]) (check: [<tool>] [--agente <id>]) (telegram: notify|approve|reject|bloqueos|consumo|allow|unallow|expira|config|send|bot [--once]|webhook|on|off) (adapters: config|use|model|url|timeout|maxchars|spawn) (skills: list|ver|borrar <id>) (agents: list|add|pause|skill|link|define|handoff|handoffs|experience|proponer|propuestas|ver-propuesta|aprobar-propuesta|rechazar-propuesta|snapshot) (secrets: solo via web Configuración)"); process.exit(cmd ? 1 : 0); }
+else { console.log("uso: axiom [--root <dir>] <init|spec|plan|tasks|verify|run|build|check|approve|reject|cycle|comp|telegram|module|ui|status|validate-spec|serve|validate-tokens|validate-openapi|sandbox> (build: [spec] [--resume]) (clarify: <spec>) (verify: pass|fail|error [--detalle] [--archivos]) (run: [--dry-run] [--agente]) (check: [<tool>] [--agente <id>]) (telegram: notify|approve|reject|bloqueos|consumo|allow|unallow|expira|config|send|bot [--once]|webhook|on|off) (adapters: config|use|model|url|timeout|maxchars|spawn) (skills: list|ver|borrar <id>) (constitution: [principio <nombre> <reglas>|enmendar <ROMANO> <reglas>|quitar <ROMANO>]) (agents: list|add|pause|skill|link|define|handoff|handoffs|experience|proponer|propuestas|ver-propuesta|aprobar-propuesta|rechazar-propuesta|snapshot) (secrets: solo via web Configuración)"); process.exit(cmd ? 1 : 0); }

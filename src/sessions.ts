@@ -254,6 +254,8 @@ export function aprobarPropuesta(root: string, id: string): { ok: true; session_
 export interface ExtraPrompt {
   instrucciones?: string;
   historial?: string;
+  /** Bloque de constitución vigente (vacío si no hay): manda en plan/build. */
+  constitucion?: string;
   /** Descripción efectiva del skill (catálogo o archivo del proyecto). */
   skillDescripcion?: string;
 }
@@ -280,10 +282,14 @@ export function promptPara(modo: ModoChat, skill: string, texto: string, extra: 
   // El chat también recibe contenido del proyecto (historial, archivos): misma defensa
   // anti-inyección que agentes y juez, para no dejar una superficie sin cubrir.
   const defensa = `\n\n${BASELINE_INYECCION}`;
+  // La constitución manda sobre el pedido (plan y build la reciben como
+  // restricción, igual que spec-kit en specify/plan/implement; ask queda fuera).
+  const cons = (extra.constitucion ?? "").trim().slice(0, 2000);
+  const bloqueCons = cons ? `\n\n${cons}` : "";
   if (modo === "ask") return `${cab}${foco}Responde a la pregunta de forma directa y concisa. Solo lectura: no ejecutes nada ni propongas actuar; si falta información, dilo.${ctx}\n\nPregunta: ${texto}${defensa}`;
   if (modo === "plan") {
     if (esTrivial(texto)) return `${cab}${foco}Responde de forma directa y breve (1-2 líneas), como un saludo o acuse. No elabores un plan numerado ni ofrezcas pasar a Build; solo si el mensaje insinúa una tarea pendiente, ofrece convertirlo en plan.${ctx}\n\nMensaje: ${texto}${defensa}`;
-    return `${cab}${foco}Investiga lo necesario y responde ÚNICAMENTE con un plan numerado de pasos, revisable por un humano. No ejecutes nada. Termina ofreciendo pasar a Build.${ctx}\n\nObjetivo: ${texto}${defensa}`;
+    return `${cab}${foco}Investiga lo necesario y responde ÚNICAMENTE con un plan numerado de pasos, revisable por un humano. No ejecutes nada. Termina ofreciendo pasar a Build.${bloqueCons}${ctx}\n\nObjetivo: ${texto}${defensa}`;
   }
-  return `${cab}${foco}${texto}${ctx}${defensa}`;
+  return `${cab}${foco}${bloqueCons ? `${bloqueCons}\n\n` : ""}${texto}${ctx}${defensa}`;
 }
