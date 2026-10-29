@@ -21,11 +21,11 @@ jobs:
     name: npm test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # El harness persiste en SQLite con node:sqlite (DatabaseSync), que pide
       # Node 22.5+. Se usa 24, el mismo con el que corre la suite localmente.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
 
