@@ -238,32 +238,47 @@ export function capturar(root: string, url: string, modo: "png" | "dom" = "png",
   }
   const id = `${new Date().toISOString().replace(/[:.]/g, "-")}_${modo}${host ? `_${host}` : ""}`;
   const archivo = join(dir, `${id}.${modo === "dom" ? "html" : "png"}`);
-  const perfil = join(tmpdir(), `axiom-browser-${id}`);
-  const args = [
-    "--headless",
-    `--user-data-dir=${perfil}`,
-    "--hide-scrollbars",
-    "--window-size=1280,800",
-    "--virtual-time-budget=5000",
-  ];
-  if (cfg.noSandbox) args.push("--no-sandbox");
-  // Siempre dump-dom (además del png): es la única forma de ver si el navegador
-  // mostró su página de error; screenshot + dump-dom funcionan en un solo spawn.
-  args.push("--dump-dom");
-  if (modo === "png") args.push(`--screenshot=${archivo}`);
-  args.push(url.trim());
   const limiteMs = cfg.timeoutMs ?? TIMEOUT_DEFAULT;
-  const t0 = Date.now();
-  const r = spawnSync(motor.ruta, args, {
-    encoding: "utf8",
-    timeout: limiteMs,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  const transcurrido = Date.now() - t0;
-  try {
-    rmSync(perfil, { recursive: true, force: true });
-  } catch {
-    /* el perfil temporal es prescindible */
+  // Un intento por vez con su propio perfil: el reintento sin sandbox no debe
+  // heredar el SingletonLock que dejó el motor que abortó.
+  const lanzar = (sinSandbox: boolean) => {
+    const perfil = join(tmpdir(), `axiom-browser-${id}${sinSandbox ? "-nosandbox" : ""}`);
+    const args = [
+      "--headless",
+      `--user-data-dir=${perfil}`,
+      "--hide-scrollbars",
+      "--window-size=1280,800",
+      "--virtual-time-budget=5000",
+    ];
+    if (sinSandbox) args.push("--no-sandbox");
+    // Siempre dump-dom (además del png): es la única forma de ver si el navegador
+    // mostró su página de error; screenshot + dump-dom funcionan en un solo spawn.
+    args.push("--dump-dom");
+    if (modo === "png") args.push(`--screenshot=${archivo}`);
+    args.push(url.trim());
+    const t0 = Date.now();
+    const salida = spawnSync(motor.ruta, args, {
+      encoding: "utf8",
+      timeout: limiteMs,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const transcurrido = Date.now() - t0;
+    try {
+      rmSync(perfil, { recursive: true, force: true });
+    } catch {
+      /* el perfil temporal es prescindible */
+    }
+    return { salida, transcurrido };
+  };
+  let sinSandbox = cfg.noSandbox === true;
+  let { salida: r, transcurrido } = lanzar(sinSandbox);
+  // Ubuntu 23.10+ (y los runners de GitHub sobre 24.04) restringen los user
+  // namespaces con AppArmor: el motor aborta al arrancar aunque el binario esté
+  // sano. Un reintento con --no-sandbox separa eso de un fallo real de la
+  // página; si tampoco arranca, el error de abajo sigue siendo el que manda.
+  if (!sinSandbox && (r.signal === "SIGABRT" || r.signal === "SIGTRAP" || /sandbox|user namespace/i.test(r.stderr ?? ""))) {
+    sinSandbox = true;
+    ({ salida: r, transcurrido } = lanzar(sinSandbox));
   }
   // Timeout de red (spawnSync mata al motor con ETIMEDOUT): la URL colgó sin
   // responder. No es «captura fallida»: hay parte de timeout como evidencia y
