@@ -23,7 +23,7 @@
 **Fecha:** 2026-10-21 — No preguntar lo confirmado salvo contradicción material.
 
 ## Confirmado
-- Stack TS+Bun, SpecKit preset/extensión, Docker jail, SQLite+MD, LiteLLM+local, pinned+evaluación.
+- Stack TypeScript + Node 24 con npm (único gestor: es el que usa el CI con `npm ci`), SpecKit preset/extensión, Docker jail, SQLite+MD, LiteLLM+local, pinned+evaluación. Las corridas de abajo dicen «Bun» porque así se hicieron entonces; se dejan como registro.
 - MVP-0 = CLI + 2 vistas texto + web mínima + Telegram canal + componentes + CI boundaries.
 - B-web sin Tailwind por decisión (coste toolchain vs 30 reglas bespoke): CSS vanilla inline en :root 3 capas, scanlines, foco visible, responsive trabajo-primero, `prefers-reduced-motion`, validado.
 
