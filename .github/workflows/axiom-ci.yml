@@ -1,0 +1,52 @@
+# CI del proyecto. Este archivo tiene que vivir dentro del repo: una copia en la
+# carpeta padre no la ve GitHub y la documentación termina prometiendo un CI que
+# no corre.
+# `npm test` ya es la cadena completa (build -> tsc de tests -> node --test ->
+# check:webjs -> check:seeds -> check:vocabulario -> check:boundaries ->
+# lint:spectral) y corta con exit != 0 en el primer eslabón que falle, así que el
+# job no duplica pasos: agregar aquí un paso suelto de Spectral lo correría dos
+# veces. La lista va con los nombres reales de los scripts (dos puntos incluidos)
+# porque `scripts/check-gates.mjs` la compara con `package.json` paso por paso.
+name: axiom-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: npm test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # El harness persiste en SQLite con node:sqlite (DatabaseSync), que pide
+      # Node 22.5+. Se usa 24, el mismo con el que corre la suite localmente.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # package-lock.json no lista las devDependencies (se agregó spectral sin
+      # regenerarlo), así que `npm ci` fallaría por desincronizado: instalamos
+      # desde package.json, que es la fuente que la suite usa de verdad.
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+
+      # La lista del comentario de arriba y la del README se mantienen a mano, así
+      # que este paso compara las dos, en orden, con `scripts.test`: falla si
+      # alguien agrega o quita un eslabón sin actualizarlas, si alguna promete uno
+      # que ya no corre, y si un doc cuenta mal la cadena con cualquiera de sus
+      # tres sustantivos: eslabones, controles (sin el build) o gates (los
+      # `npm run` salvo build). El check calcula las tres cifras; el comentario
+      # no las repite para no volverse una copia que también haya que mantener.
+      # No necesita build ni red; va antes de la suite para fallar rápido.
+      - name: Cadena documentada al día
+        run: node scripts/check-gates.mjs
+
+      # Incluye Spectral (`lint:spectral` con --fail-severity warn): el contrato
+      # de la API rompe el push ante cualquier warning, no solo ante errores.
+      - name: Suite completa
+        run: npm test
