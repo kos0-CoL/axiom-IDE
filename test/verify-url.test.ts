@@ -16,8 +16,11 @@ import { verificar } from "../dist/commands.js";
 import { openDb } from "../dist/store.js";
 import { detectarMotor } from "../dist/modules/browser/index.js";
 
-// .invalid nunca resuelve (RFC 2606): la página de error no depende de red real.
-const URL_ERROR = "http://no-existe-axiom.invalid";
+// Un puerto local cerrado da la página de error sin salir a la red y sin
+// depender del resolutor: `.invalid` servía en local, pero en el runner de CI
+// el DNS se cuelga hasta el timeout y el caso terminaba como «timeout de red»
+// en vez de «página de error», que es lo que este test verifica.
+const URL_ERROR = "http://127.0.0.1:65000";
 
 interface Evidencia {
   exit: number;
