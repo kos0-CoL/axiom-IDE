@@ -3,6 +3,9 @@
   "version": "0.9.31",
   "type": "module",
   "description": "Axiom IDE harness A2: preset SpecKit + spec/plan/tasks/verify/run",
+  "engines": {
+    "node": ">=22.5"
+  },
   "bin": {
     "axiom": "./dist/cli.js"
   },

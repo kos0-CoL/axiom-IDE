@@ -16,6 +16,12 @@ Un harness tradicional envuelve un bucle de LLM (`prompt → spawn → output`) 
 
 > **Regla de la casa:** sin evidencia (cmd + sha + veredicto) no hay verificado/aceptado; sin respuesta no hay aprobación; Telegram es canal, no juez.
 
+## Requisitos
+
+- **Node.js 22.5 o superior** (`engines` del `package.json`); el CI corre con 24. El harness persiste con `node:sqlite` (`DatabaseSync`), que no existe antes de esa versión: con Node 20 o 22.0 el `build` pasa pero el primer comando que toca la base falla al importar el módulo.
+- **npm** como único gestor. Es el que usa el CI (`npm ci` contra `package-lock.json`), así que el lock manda: si agregás una dependencia, actualizá el lock en la misma entrega.
+- El frontend es un paquete aparte con su propio lock, y compila en el CI; para trabajar en la UI, `cd frontend && npm install`.
+
 ## Instalación
 
 ```bash
