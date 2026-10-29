@@ -29,11 +29,11 @@ jobs:
         with:
           node-version: '24'
 
-      # package-lock.json no lista las devDependencies (se agregó spectral sin
-      # regenerarlo), así que `npm ci` fallaría por desincronizado: instalamos
-      # desde package.json, que es la fuente que la suite usa de verdad.
+      # `npm ci` y no `npm install`: el lock está completo (declaradas y
+      # transitivas), así que la corrida instala exactamente lo versionado y
+      # falla si package.json y package-lock.json se desincronizan.
       - name: Instalar dependencias
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       # El test `verify --url` necesita un motor real: el Chromium del sistema
       # aborta en este runner (AppArmor restringe los user namespaces) y sin
