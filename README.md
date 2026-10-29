@@ -20,8 +20,6 @@ Un harness tradicional envuelve un bucle de LLM (`prompt → spawn → output`) 
 
 ```bash
 cd axiom
-bun install && bun run build
-# o con npm:
 npm install && npm run build
 ```
 

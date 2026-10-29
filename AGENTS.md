@@ -1,8 +1,8 @@
 # AGENTS.md — Axiom harness (MVP-0)
 
-Comandos probados (Bun 1.4+):
-- `bun install && bun run build`
-- `bun src/cli.ts --root <dir> init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|adapters|module|ui|status|validate-spec|serve|browser|grafos|memory|validate-tokens|validate-openapi (flags: --rondas, --tokens, --calls, --cmd, --image, --timeout, --dry-run, --detalle, --archivos, --url, --dom, --keep)`
+Comandos probados (Node 24 + npm; es el gestor que usa el CI):
+- `npm install && npm run build`
+- `node dist/cli.js --root <dir> init|spec|plan|tasks|verify|run|check|approve|reject|cycle|comp|telegram|adapters|module|ui|status|validate-spec|serve|browser|grafos|memory|validate-tokens|validate-openapi (flags: --rondas, --tokens, --calls, --cmd, --image, --timeout, --dry-run, --detalle, --archivos, --url, --dom, --keep)`; durante el desarrollo, `npm run dev -- --root <dir> …` corre el mismo CLI desde `src/`
 - `node scripts/check-webjs.mjs` (o `npm run check:webjs`): valida el `<script>` inline de la página servida con `vm.Script` + marcadores; `tsc` no ve una comilla de más dentro de ese string. Corre dentro de `npm test`, después del build.
 - `node scripts/check-boundaries.mjs`
 - `npm run evals` (suite con línea base: compara contra `evals/baseline.json`; `-- --write-baseline` la reescribe solo si todo pasa, `-- --no-build` usa dist actual). Regresión = caso ok en base que ahora falla.
