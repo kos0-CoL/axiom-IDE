@@ -19,6 +19,7 @@ interface Evento {
   delta?: string;
   ok?: boolean;
   texto?: string;
+  propuesta_archivos?: { id: string; changes: { path: string; content: string }[] };
 }
 
 async function puertoLibre(): Promise<number> {
@@ -54,7 +55,9 @@ async function leerEvento(
   }
 }
 
-async function proyectoConProveedor(): Promise<{ base: string; cerrar: () => void; liberar: () => void; pedidos: () => number }> {
+async function proyectoConProveedor(
+  partes: string[] = ["Hola", " mundo"],
+): Promise<{ base: string; cerrar: () => void; liberar: () => void; pedidos: () => number }> {
   const base = mkdtempSync(join(tmpdir(), "axiom-stream-"));
   let pedidos = 0;
   let liberar: () => void = () => {};
@@ -75,8 +78,9 @@ async function proyectoConProveedor(): Promise<{ base: string; cerrar: () => voi
         return;
       }
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.write('data: {"choices":[{"delta":{"content":"Hola"}}]}\n\n');
-      res.write('data: {"choices":[{"delta":{"content":" mundo"}}]}\n\n');
+      for (const parte of partes) {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: parte } }] })}\n\n`);
+      }
       res.write('data: {"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n');
       res.write("data: [DONE]\n\n");
       res.end();
@@ -131,6 +135,44 @@ test("el stream se abre antes de llamar al modelo y anuncia la fase", async () =
     assert.deepEqual(deltas, ["Hola", " mundo"], `cada delta sale por SSE en vivo, no en una sola pieza (final: ${JSON.stringify(final)})`);
     assert.equal(final?.ok, true);
     assert.equal(final?.texto, "Hola mundo");
+  } finally {
+    p.cerrar();
+  }
+});
+
+// En build la respuesta es un JSON con archivos completos. Volcarlo delta a
+// delta llenaba el chat de llaves y comillas (la queja: «comienza a escribir
+// caracteres») y tapaba las etapas. El stream sigue abierto para anunciarlas,
+// pero los trozos del JSON no salen al cliente.
+test("en build el JSON no se vuelca al chat: solo etapas y la propuesta", async () => {
+  const json = JSON.stringify({ summary: "crear saludo", changes: [{ path: "saludo.txt", content: "hola\n" }] });
+  const p = await proyectoConProveedor([json.slice(0, 12), json.slice(12)]);
+  try {
+    const r = await fetch(`${p.base}/api/chat/enviar`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ texto: "creá saludo.txt con un saludo", modo: "build", stream: true }),
+    });
+    assert.equal(r.status, 200);
+    p.liberar();
+    const lector = r.body!.getReader();
+    const estado = { buf: "", fin: false };
+    const fases: string[] = [];
+    const deltas: string[] = [];
+    let final: Evento | null = null;
+    for (;;) {
+      const ev = await leerEvento(lector, estado);
+      if (!ev) break;
+      if (typeof ev.delta === "string") deltas.push(ev.delta);
+      else if (typeof ev.fase === "string") fases.push(ev.fase);
+      else final = ev;
+    }
+    assert.deepEqual(deltas, [], "build no manda los trozos del JSON al chat");
+    assert.ok(fases.some((f) => /propuesta/i.test(f)), `las etapas nombran la propuesta: ${JSON.stringify(fases)}`);
+    assert.equal(final?.ok, true);
+    assert.doesNotMatch(final?.texto ?? "", /"changes"/, "el texto final es el resumen, no el JSON crudo");
+    assert.match(final?.texto ?? "", /Propuesta bp-/);
+    assert.equal(final?.propuesta_archivos?.changes[0]?.path, "saludo.txt");
   } finally {
     p.cerrar();
   }
