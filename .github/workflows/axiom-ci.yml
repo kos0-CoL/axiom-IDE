@@ -35,6 +35,13 @@ jobs:
       - name: Instalar dependencias
         run: npm install --no-audit --no-fund
 
+      # El test `verify --url` necesita un motor real: el Chromium del sistema
+      # aborta en este runner (AppArmor restringe los user namespaces) y sin
+      # captura el caso no puede pasar. Se instala la caché de Playwright, que
+      # es la primera fuente que busca el módulo de browser.
+      - name: Motor de navegador (Chromium)
+        run: npx --yes playwright@1.49.0 install chromium
+
       # La lista del comentario de arriba y la del README se mantienen a mano, así
       # que este paso compara las dos, en orden, con `scripts.test`: falla si
       # alguien agrega o quita un eslabón sin actualizarlas, si alguna promete uno
