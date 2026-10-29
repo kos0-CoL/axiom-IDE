@@ -12,6 +12,7 @@ telegram.bot-token
 
 # artefactos de la recuperación: no forman parte del proyecto
 .recovery/worktrees/
+.recovery/plans/
 .recovery/*.log
 
 # copias de seguridad de archivos con sufijo
