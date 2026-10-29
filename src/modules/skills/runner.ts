@@ -4,6 +4,7 @@
 // (el entorno heredado se filtra; solo PATH + allowlist explícita).
 // No es un sandbox de contenedor: es aislamiento de proceso + límites,
 // documentado como tal en docs/skills-formato.md.
+import { ENV, valorEnv } from "../../env.js";
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -51,8 +52,10 @@ export function resolverScriptSkill(root: string, skillId: string, scriptRel: st
 
 function entornoFiltrado(extra?: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
-  if (process.env.PATH) env.PATH = process.env.PATH;
-  if (process.env.HOME) env.HOME = process.env.HOME;
+  const ruta = valorEnv(ENV.PATH);
+  const home = valorEnv(ENV.HOME);
+  if (ruta) env.PATH = ruta;
+  if (home) env.HOME = home;
   if (extra) {
     for (const [k, v] of Object.entries(extra)) {
       if (/KEY|SECRET|TOKEN|PASSWORD|PASS|CREDENTIAL/i.test(k)) continue;

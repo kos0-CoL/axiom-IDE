@@ -4,6 +4,7 @@
 // Captura: screenshot PNG o DOM renderizado como evidencia en .axiom/browser/.
 // Sin dependencias npm nuevas: binario + child_process. Fail soft en detección,
 // fail closed en ejecución (sin motor no captura, lo dice y no inventa).
+import { ENV, valorEnv } from "../../env.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -91,10 +92,11 @@ function primeraRutaExistente(base: string, relativas: string[]): string | undef
 
 // Caché de Playwright: dirs chromium-* (más reciente primero) y headless shells.
 function candidatosPlaywright(): { nombre: string; ruta: string }[] {
+  // Una lectura, no tres: `0` desactiva la caché de Playwright (convención de la
+  // herramienta) y se trata como ausente.
+  const cache = valorEnv(ENV.PLAYWRIGHT_BROWSERS_PATH);
   const bases = [
-    process.env.PLAYWRIGHT_BROWSERS_PATH && process.env.PLAYWRIGHT_BROWSERS_PATH !== "0"
-      ? process.env.PLAYWRIGHT_BROWSERS_PATH
-      : undefined,
+    cache && cache !== "0" ? cache : undefined,
     join(homedir(), ".cache", "ms-playwright"),
   ].filter((b): b is string => Boolean(b));
   const out: { nombre: string; ruta: string }[] = [];

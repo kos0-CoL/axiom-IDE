@@ -10,11 +10,15 @@
     "build": "tsc && node scripts/stamp-build.mjs",
     "prestart": "npm run build",
     "start": "node dist/cli.js",
-    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/*.test.js && npm run check:seeds",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/*.test.js && npm run check:webjs && npm run check:seeds && npm run check:vocabulario && npm run check:boundaries && npm run lint:spectral",
+    "check:webjs": "node scripts/check-webjs.mjs",
     "check:seeds": "node scripts/check-seeds.mjs",
+    "check:vocabulario": "node scripts/check-vocabulario.mjs",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check:gates": "node scripts/check-gates.mjs",
     "evals": "node scripts/evals.mjs",
     "dev": "npx tsx src/cli.ts",
-    "lint:spectral": "spectral lint openapi.json -r .spectral.json"
+    "lint:spectral": "spectral lint openapi.json -r .spectral.json --fail-severity warn"
   },
   "dependencies": {
     "zod": "^3.23.8"

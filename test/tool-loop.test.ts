@@ -29,6 +29,7 @@ function deps(turnos: string[], extra: Partial<DepsLoop> = {}): { d: DepsLoop; v
     leer: () => "contenido real",
     delegar: async () => "subtarea hecha",
     buscar: async () => "[1] Ref\nhttps://x\nsnippet",
+    navegar: async () => "navegado: https://x\ntexto visible: hola",
     ...extra,
   };
   return { d, vistos };
@@ -123,6 +124,43 @@ test("herramientasLoop solo ofrece leer/delega no-denegadas", () => {
   assert.deepEqual(herramientasLoop({ herramientas: [] }), []);
   assert.ok(!seccionHerramientas(["leer"]).includes("delega"), "el prompt no lista lo no ofrecido");
   assert.ok(seccionHerramientas(["leer", "delega", "buscar"]).includes('"tool":"buscar"'), "buscar documentada cuando se ofrece");
+  // navegar: solo cuando el agente la declara, y el prompt la documenta.
+  assert.deepEqual(herramientasLoop({ herramientas: [{ tool: "navegar", acceso: "ask" }] }), ["navegar"]);
+  assert.deepEqual(herramientasLoop({ herramientas: [{ tool: "navegar", acceso: "deny" }] }), []);
+  assert.ok(!seccionHerramientas(["leer"]).includes('"tool":"navegar"'), "navegar no se lista si no se ofrece");
+  assert.ok(seccionHerramientas(["navegar"]).includes('"tool":"navegar"'), "navegar documentada cuando se ofrece");
+});
+
+test("navegar: solo URLs http(s) se consideran llamadas válidas", () => {
+  const t = '```tool\n{"tool":"navegar","url":"https://ejemplo.test/a"}\n```\n```tool\n{"tool":"navegar","url":"file:///etc/passwd"}\n```\n```tool\n{"tool":"navegar","url":""}\n```';
+  const ls = extraerLlamadas(t);
+  assert.equal(ls.length, 1);
+  assert.deepEqual(ls[0], { tool: "navegar", objetivo: "https://ejemplo.test/a", tarea: "" });
+});
+
+test("navegar real en el loop: el texto de la página alimenta el turno siguiente", async () => {
+  const vistas: string[] = [];
+  const { d, vistos } = deps([
+    '```tool\n{"tool":"navegar","url":"http://localhost:3000/"}\n```',
+    "trabajo final con la página leída",
+  ], {
+    navegar: async (url) => { vistas.push(url); return "texto visible: Bienvenido al kiosco"; },
+  });
+  const r = await correrLoop("explorador", "base", ["navegar"], d);
+  assert.equal(r.herramientas, 1);
+  assert.deepEqual(vistas, ["http://localhost:3000/"]);
+  assert.match(vistos[1], /Bienvenido al kiosco/);
+  assert.equal(r.texto, "trabajo final con la página leída");
+});
+
+test("navegar sin aprobación aborta: la página no se abre sin broker", async () => {
+  const vistas: string[] = [];
+  const { d } = deps(['```tool\n{"tool":"navegar","url":"https://ejemplo.test"}\n```'], {
+    autorizar: async () => ({ decision: "ask" as const, motivo: "riesgo alto exige aprobación humana", id: "ap-123" }),
+    navegar: async (url) => { vistas.push(url); return "no debería llegar"; },
+  });
+  await assert.rejects(() => correrLoop("explorador", "base", ["navegar"], d), /necesita aprobación para navegar.*ap-123/);
+  assert.deepEqual(vistas, [], "sin aprobación no se navega");
 });
 
 test("buscar real en el loop: refs como dato, sin key como error-dato", async () => {

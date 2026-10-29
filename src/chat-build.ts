@@ -26,9 +26,14 @@ function safeRelativePath(raw: unknown): string | null {
   return path;
 }
 
+const DIRS_EXCLUIDOS = new Set(["node_modules", ".git", ".next", "dist", "dist-test", "build", "coverage", ".cache"]);
+
+// Nombres de archivo que no aportan estructura y solo agregan ruido al índice
+// (binarios y binarios de imagen/audio/documento).
+const EXT_BINARIA = /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|bz2|xz|woff2?|ttf|otf|eot|mp[34]|webm|mov|sqlite|db|wasm)$/i;
+
 export function contextoWorkspace(root: string, maxChars = 24_000): string {
   const projectRoot = resolve(root);
-  const excludedDirs = new Set(["node_modules", ".git", ".next", "dist", "dist-test", "build", "coverage", ".cache"]);
   const allowed = /(?:^|\/)(?:README(?:\.[^/]*)?|package\.json|tsconfig(?:\.[^/]*)?\.json|vite\.config\.[^/]+|index\.html|[^/]+\.(?:tsx?|jsx?|css|html|json|md))$/i;
   const results: string[] = [];
   let total = 0;
@@ -42,7 +47,7 @@ export function contextoWorkspace(root: string, maxChars = 24_000): string {
       const path = join(dir, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        if (!excludedDirs.has(entry.name)) visit(path, depth + 1);
+        if (!DIRS_EXCLUIDOS.has(entry.name)) visit(path, depth + 1);
       } else if (entry.isFile() && allowed.test(path.slice(projectRoot.length + 1))) {
         try {
           const content = readFileSync(path, "utf8");
@@ -62,18 +67,116 @@ export function contextoWorkspace(root: string, maxChars = 24_000): string {
   return results.length ? `Archivos existentes del proyecto (solo contexto; no cambies nada fuera de changes[]):\n${results.join("\n\n")}` : "El proyecto aún no contiene archivos fuente relevantes.";
 }
 
-export function contextoPlanAprobado(root: string, sessionId: string, maxChars = 16_000): string {
+// El plan dice qué archivos tocar, pero no dónde vive cada cosa: sin las rutas
+// hermanas el modelo inventa módulos o duplica un helper que ya existe. El
+// índice da esa estructura sin pagar contenido (órdenes de magnitud menos
+// caracteres que `contextoWorkspace`), y solo se agrega cuando el contexto del
+// turno viene recortado por el plan.
+export function indiceWorkspace(root: string, maxChars = 4_000, maxArchivos = 400): string {
+  const projectRoot = resolve(root);
+  const rutas: string[] = [];
+  const visitar = (dir: string, profundidad: number): void => {
+    if (profundidad > 6) return;
+    try { if (lstatSync(dir).isSymbolicLink()) return; } catch { return; }
+    let entradas;
+    try { entradas = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entradas) {
+      if (entry.name.startsWith(".") || entry.name.endsWith(".db")) continue;
+      const path = join(dir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (!DIRS_EXCLUIDOS.has(entry.name)) visitar(path, profundidad + 1);
+        continue;
+      }
+      if (!entry.isFile() || EXT_BINARIA.test(entry.name)) continue;
+      rutas.push(relative(projectRoot, path).split(sep).join("/"));
+    }
+  };
+  visitar(projectRoot, 0);
+  if (!rutas.length) return "";
+  rutas.sort((a, b) => a.localeCompare(b));
+  const cabecera = "Estructura del proyecto (solo rutas, sin contenido; ubícalas, no deduzcas su código):";
+  const elegidas: string[] = [];
+  let total = 0;
+  for (const ruta of rutas) {
+    if (elegidas.length >= maxArchivos) break;
+    const linea = `\n- ${ruta}`;
+    if (total + linea.length > maxChars) break;
+    elegidas.push(ruta);
+    total += linea.length;
+  }
+  const resto = rutas.length - elegidas.length;
+  return `${cabecera}${elegidas.map((r) => `\n- ${r}`).join("")}${resto > 0 ? `\n…(${resto} ruta(s) más)` : ""}`;
+}
+
+type PlanAprobado =
+  | { ok: true; spec: string; plan: string }
+  | { ok: false; motivo: "sin-plan" | "id-invalido" | "sin-artefactos" };
+
+// Única lectura del plan aprobado de una sesión (lo usan el prompt y el recorte
+// de archivos). El motivo se conserva porque cada caso merece un aviso distinto.
+function planAprobado(root: string, sessionId: string): PlanAprobado {
   const db = openDb(root);
   try {
     const row = db.prepare("SELECT pa.spec_id FROM plan_artifacts pa JOIN plan_propuestas pp ON pp.id=pa.proposal_id WHERE pp.session_id=? AND pp.estado='aprobada' ORDER BY pp.decided_at DESC LIMIT 1").get(sessionId) as { spec_id: string } | undefined;
-    if (!row) return "La sesión aún no tiene un plan aprobado.";
-    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(row.spec_id)) return "El identificador del plan guardado no es válido.";
+    if (!row) return { ok: false, motivo: "sin-plan" };
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(row.spec_id)) return { ok: false, motivo: "id-invalido" };
     const dir = join(resolve(root), "specs", "active", row.spec_id);
-    const spec = readFileSync(join(dir, "spec.md"), "utf8").slice(0, maxChars / 2);
-    const plan = readFileSync(join(dir, "plan.md"), "utf8").slice(0, maxChars / 2);
-    return `${spec}\n\n${plan}`.slice(0, maxChars);
-  } catch { return "Los artefactos del plan aprobado no están disponibles; continúa usando la solicitud y el contexto del workspace."; }
+    return { ok: true, spec: readFileSync(join(dir, "spec.md"), "utf8"), plan: readFileSync(join(dir, "plan.md"), "utf8") };
+  } catch { return { ok: false, motivo: "sin-artefactos" }; }
   finally { db.close(); }
+}
+
+export function contextoPlanAprobado(root: string, sessionId: string, maxChars = 16_000): string {
+  const p = planAprobado(root, sessionId);
+  if (!p.ok) {
+    if (p.motivo === "sin-plan") return "La sesión aún no tiene un plan aprobado.";
+    if (p.motivo === "id-invalido") return "El identificador del plan guardado no es válido.";
+    return "Los artefactos del plan aprobado no están disponibles; continúa usando la solicitud y el contexto del workspace.";
+  }
+  return `${p.spec.slice(0, maxChars / 2)}\n\n${p.plan.slice(0, maxChars / 2)}`.slice(0, maxChars);
+}
+
+// Un plan aprobado nombra los archivos que hay que tocar (`src/web.ts`,
+// `package.json`). Mandar el workspace entero en cada turno de Build paga hasta
+// 24 000 caracteres de contexto que el modelo no va a usar, así que cuando el
+// plan nombra archivos se mandan solo esos. Si no nombra ninguno —o ninguno
+// existe— se devuelve vacío y el llamador cae al workspace completo, como antes.
+//
+// Limitación conocida: el plan puede nombrar un archivo para excluirlo («no
+// toques src/c.ts») y se incluye igual. Preferimos un poco de contexto de más a
+// que el modelo escriba a ciegas un archivo que el plan sí menciona.
+const ARCHIVO_EN_PLAN = /(?:^|[\s`"'(<\[|=,:;])((?:[\w.@-]+\/)*[\w.@-]+\.(?:[cm]?[jt]sx?|json|md|css|html|py|rb|go|rs|java|kt|swift|sh|ya?ml|toml|sql|txt))\b/g;
+
+export function archivosDelPlan(root: string, sessionId: string, maxChars = 12_000): { archivos: string[]; contexto: string } {
+  const p = planAprobado(root, sessionId);
+  if (!p.ok) return { archivos: [], contexto: "" };
+  const texto = `${p.spec}\n\n${p.plan}`;
+  const vistos = new Set<string>();
+  const bloques: string[] = [];
+  let total = 0;
+  for (const m of texto.matchAll(ARCHIVO_EN_PLAN)) {
+    const rel = safeRelativePath(m[1]);
+    if (!rel || vistos.has(rel)) continue;
+    try {
+      const abs = join(resolve(root), rel);
+      if (!lstatSync(abs).isFile()) continue;
+      const contenido = readFileSync(abs, "utf8");
+      if (contenido.includes("\0")) continue;
+      const bloque = `--- ${rel} ---\n${contenido.slice(0, 5000)}`;
+      const recortado = bloque.slice(0, maxChars - total);
+      if (!recortado) break;
+      bloques.push(recortado);
+      vistos.add(rel);
+      total += recortado.length;
+      if (total >= maxChars) break;
+    } catch { /* el plan lo nombra pero no existe: se ignora, no se inventa */ }
+  }
+  if (!bloques.length) return { archivos: [], contexto: "" };
+  return {
+    archivos: [...vistos],
+    contexto: `Archivos nombrados por el plan aprobado (solo estos; no cambies nada fuera de changes[]):\n${bloques.join("\n\n")}`,
+  };
 }
 
 export function parseBuildChanges(text: string): { ok: true; changes: FileChange[]; summary?: string } | Failure {

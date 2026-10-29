@@ -332,6 +332,10 @@ export async function ejecutar(
   a: TipoAccion,
   args: Record<string, unknown>,
   llamada: LlamadaTrazable = {},
+  // Único llamador que puede saltarse el gate interno: el tool-loop de agentes,
+  // que YA autorizó `navegar` con la declaración del agente y dejó su traza.
+  // Sin esto la misma navegación pediría dos aprobaciones (una por cada gate).
+  opciones: { yaAutorizado?: boolean } = {},
 ): Promise<RespuestaAccion> {
   const limites = limitesDe(root);
   const n = normalizar(a, args);
@@ -362,8 +366,10 @@ export async function ejecutar(
   const contrato = CONTRATOS[a];
   const contexto = llamada.contexto ?? (c ? `sesion ${c.id}` : "browser (sin sesión)");
   const entrada = { ...(typeof llamada.entrada === "object" && llamada.entrada ? llamada.entrada as Record<string, unknown> : {}), accion: a, sesion: c?.id ?? "", url: n.url ?? "", selector: n.selector ?? "" };
-  const previa = consumirAprobacionManual(root, contrato.name, contexto, llamada.origen ?? "cli");
-  const decision = previa
+  const previa = opciones.yaAutorizado ? undefined : consumirAprobacionManual(root, contrato.name, contexto, llamada.origen ?? "cli");
+  const decision = opciones.yaAutorizado
+    ? { decision: "allow" as const, motivo: `autorizado por el tool-loop del agente en ${contexto}`, id: undefined }
+    : previa
     ? { decision: "allow" as const, motivo: `aprobación ${previa.id} consumida en ${contexto}`, id: previa.id }
     : check(root, contrato.name, contrato, undefined, { origen: llamada.origen ?? "cli", entrada, contexto });
   if (decision.decision === "ask") return err(1, `${contrato.name} necesita aprobación (${decision.id ?? "?"}): ${decision.motivo} — aprueba con \`axiom approve ${decision.id}\` (cada aprobación autoriza un uso)`);

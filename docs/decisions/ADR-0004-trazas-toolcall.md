@@ -33,13 +33,37 @@ Traza **local-first en SQLite** (`trace_log`), sin dependencias nuevas:
    panel reutilizan `listTrazas` + `lineaTraza`, así que CLI y panel no
    divergen ni en la query ni en el formato.
 
+## Turnos: id de correlación (2026-10-28)
+
+Una traza dice qué herramienta corrió; no decía **a qué pedido pertenecía**. El
+vínculo era `contexto` (texto libre, p. ej. `run <spec>/<tarea>`), que se rompe
+con cualquier cambio de formato. Se añadió la tabla `turnos` y la columna
+`trace_log.turno_id` (migración por columna, las filas viejas quedan en `''`):
+
+- **Un turno = un pedido.** `nuevoTurnoId()` (`t-xxxxxxxx`) se crea antes de
+  llamar al modelo, de modo que un turno fallido también deja fila. Guarda
+  sesión, ids de los mensajes de usuario y de respuesta, proveedor/modelo, sha256
+  del prompt efectivo (no el prompt), tokens con cache, costo, nº de llamadas al
+  modelo y de herramientas, `ok`/`error` y duración.
+- **El id viaja a las trazas:** `ejecutarAgenteConTools` lo pasa a
+  `autorizarUso` → `broker.check`/`consumirAprobacion`; el chat lo escribe en su
+  fila. `trazasDeTurno(root, id)` devuelve la cadena sin matching de texto.
+- **Consulta:** `axiom status --trace` lista los últimos 5 turnos con sus trazas
+  anidadas (`lineaTurno`); `lineaTraza` añade `turno=<id>` cuando existe.
+- **Best-effort igual que la traza:** un turno que no se escribe nunca rompe la
+  respuesta que lo produjo. Retención: 500 turnos, la escala de `trace_log`.
+
 ## Consecuencias
 
 - El criterio de AXM-066 es verificable desde CLI: qué tool, quién, qué decidió,
-  cuánto tardó y el IO, en una línea por llamada.
+  cuánto tardó y el IO, en una línea por llamada; y con qué pedido se
+  correlaciona (`turno=`).
 - **Fuera de alcance, deliberadamente:** export OTel/Langfuse (el stack entero
   sigue siendo opcional en E5; añadirlo no cambia el criterio) y compaction de
   memoria (gap aparte de ADR-0002).
+- Turnos cubiertos por `test/turnos.test.ts` (5 tests: correlación en el
+  broker, persistencia y formato, best-effort, migración de `turno_id` y un
+  turno real del chat con mensaje/respuesta enlazados).
 - Cubierto por `test/trazas.test.ts` (5 tests), `test/trazas-api.test.ts`
   (GET /api/trazas + vista del panel) y en `npm run evals` por los casos
   `trazas-toolcall` (CLI) y `api-trazas` (servidor real: endpoint + vista +

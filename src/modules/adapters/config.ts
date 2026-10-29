@@ -92,5 +92,11 @@ export function loadConfig(root: string): { ok: true; config: AdaptersConfig } |
 }
 
 export function saveConfig(root: string, cfg: AdaptersConfig): void {
-  writeFileSync(configPath(root), JSON.stringify(cfg, null, 2) + "\n");
+  // Se guarda ya normalizado: un espacio final pegado desde la web no se ve en
+  // el formulario, pero rompe la URL y el fallo aparece recién al chatear.
+  const limpio: AdaptersConfig = { ...cfg, model: cfg.model.trim() };
+  const base = cfg.baseUrl?.trim();
+  if (base) limpio.baseUrl = base;
+  else delete limpio.baseUrl;
+  writeFileSync(configPath(root), JSON.stringify(limpio, null, 2) + "\n");
 }

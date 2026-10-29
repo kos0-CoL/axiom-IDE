@@ -16,7 +16,7 @@ export function renderOrquestacion(root: string): string {
   out.push("+-- AXIOM ORQUESTACIÓN ----------------------------------+");
   out.push(`techo rondas=${global.techo.rondas} tokens=${global.techo.tokens} calls=${global.techo.calls}`);
   out.push(`tareas: ${tasks.map((t: any) => `${t.estado}=${t.c}`).join(" ") || "0"}`);
-  out.push(`usos: ${listUsos(root, 5).map((u) => `+${u.total}tok(${u.fuente})`).join(" ") || "(sin spawns)"}`);
+  out.push(`usos: ${listUsos(root, 5).map((u) => `+${u.total}tok(${u.fuente})${u.costo_usd !== null ? ` $${u.costo_usd}` : ""}`).join(" ") || "(sin spawns)"}`);
   out.push("aprobaciones recientes:");
   for (const a of aprob as any[]) out.push(`  [${a.estado}] ${a.id} ${a.tool} riesgo=${a.riesgo}`);
   if ((aprob as any[]).length === 0) out.push("  (vacío)");
@@ -29,8 +29,11 @@ export function renderOrquestacion(root: string): string {
 export interface AprobacionView { id: string; tool: string; riesgo: string; estado: string; created_at: string; decided_by: string; decided_at: string; agente: string; usada_at: string; usada_por: string }
 
 // JSON para la web: mismas consultas que el texto (criterio UI-SPEC 5: sin divergencia).
-export interface UsoView { prompt: number; respuesta: number; total: number; fuente: string; created_at: string }
-export function datosOrquestacion(root: string): { techo: { rondas: number; tokens: number; calls: number }; consumo: { tokens: number; calls: number }; usos: UsoView[]; tareas: { estado: string; n: number }[]; aprobaciones: AprobacionView[] } {
+export interface UsoView {
+  prompt: number; respuesta: number; total: number; fuente: string; created_at: string;
+  proveedor: string; modelo: string; cache_lectura: number; cache_escritura: number; costo_usd: number | null;
+}
+export function datosOrquestacion(root: string): { techo: { rondas: number; tokens: number; calls: number }; consumo: { tokens: number; calls: number; costo: number }; usos: UsoView[]; tareas: { estado: string; n: number }[]; aprobaciones: AprobacionView[] } {
   const db = openDb(root);
   const tasks = db.prepare("SELECT estado, COUNT(*) c FROM tasks GROUP BY estado").all() as any[];
   // `agente` identifica a quién se le pidió la herramienta y `usada_at`/`usada_por`

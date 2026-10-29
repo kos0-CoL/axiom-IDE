@@ -125,7 +125,7 @@ export function responderTodas(spec: string, respuestas: string[]): ResultadoCla
 const CATEGORIAS = "alcance, roles, datos, integraciones, UX, seguridad, despliegue";
 
 const PROMPT_PROPUESTA = (spec: string): string =>
-  `Esta spec puede ser ambigua. Lista las preguntas que un implementador necesitaría aclarar antes de codificar, ` +
+  `Esta spec puede ser ambigua. Lista entre 3 y ${MAX_PREGUNTAS} preguntas que un implementador necesitaría aclarar antes de codificar, ` +
   `en estas categorías: ${CATEGORIAS}. Devuelve SOLO JSON válido: un array de hasta ${MAX_PREGUNTAS} objetos ` +
   `con forma {"pregunta": "...", "motivo": "..."} (pregunta corta, motivo = por qué importa). ` +
   `Sin ambigüedad real devuelve []. Sin fences ni texto externo.\n\n## Spec\n\n${spec.slice(0, 4000)}${spec.length > 4000 ? "\n…(recortada)" : ""}\n`;

@@ -6,10 +6,13 @@ import { getConsumo } from "../../store.js";
 import { spawnOllama, SpawnResult } from "./ollama.js";
 import { litellmKeyFromEnv, spawnLiteLLM, usoEstimado } from "./litellm.js";
 import type { UsoSpawn } from "./litellm.js";
+import type { ToolDefinicion, ToolCallNativo, SpawnAbierto } from "./openai_compat.js";
 import { spawnOpenAICompat, fetchOpenRouterModels } from "./openai_compat.js";
 import { getSecret } from "../../secrets.js";
+import { conCosto } from "../../pricing.js";
 
 export type { SpawnResult, UsoSpawn };
+export type { ToolDefinicion, ToolCallNativo, SpawnAbierto } from "./openai_compat.js";
 export { usoEstimado };
 export { loadConfig };
 export { baseUrlDe, litellmKeyFromEnv };
@@ -21,7 +24,7 @@ export function configText(root: string): string {
   return `adapters.config.json: proveedor=${c.proveedor} model=${c.model} base=${baseUrlDe(c)} timeout=${c.timeoutMs}ms maxChars=${c.maxChars}`;
 }
 
-export function datosModulo(root: string): { proveedor: string; modelo: string; consumo: { totalTokens: number; totalCalls: number; ultimos: { prompt: number; respuesta: number; total: number; fuente: string }[] } } {
+export function datosModulo(root: string): { proveedor: string; modelo: string; consumo: { totalTokens: number; totalCalls: number; costoTotal: number; ultimos: { prompt: number; respuesta: number; total: number; fuente: string; cache_lectura: number; costo_usd: number | null }[] } } {
   const cfg = loadConfig(root);
   const c = cfg.ok ? cfg.config : { proveedor: "off", model: "‑", timeoutMs: 0, maxChars: 0 };
   const prov = c.proveedor === "off" ? "sin proveedor" : c.proveedor;
@@ -29,10 +32,10 @@ export function datosModulo(root: string): { proveedor: string; modelo: string; 
   const uso = getConsumo(root, "global");
   const db = openDb(root);
   const ultimos = db
-    .prepare("SELECT prompt, respuesta, total, fuente, created_at FROM uso_log ORDER BY id DESC LIMIT 5")
-    .all() as { prompt: number; respuesta: number; total: number; fuente: string; created_at: string }[];
+    .prepare("SELECT prompt, respuesta, total, fuente, cache_lectura, costo_usd, created_at FROM uso_log ORDER BY id DESC LIMIT 5")
+    .all() as { prompt: number; respuesta: number; total: number; fuente: string; cache_lectura: number; costo_usd: number | null; created_at: string }[];
   db.close();
-  return { proveedor: prov, modelo: model, consumo: { totalTokens: uso.tokens, totalCalls: uso.calls, ultimos } };
+  return { proveedor: prov, modelo: model, consumo: { totalTokens: uso.tokens, totalCalls: uso.calls, costoTotal: uso.costo, ultimos } };
 }
 
 const KEY_POR_PROVEEDOR: Record<string, "AXIOM_LITELLM_KEY" | "OPENAI_API_KEY" | "ANTHROPIC_API_KEY" | "GOOGLE_API_KEY" | "OPENROUTER_API_KEY"> = {
@@ -155,10 +158,10 @@ export function ponerMaxChars(root: string, n?: string): string {
   return `maxChars: ${v}`;
 }
 
-export async function spawn(
+async function spawnSinCosto(
   root: string,
   task: string,
-  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; proveedor?: Proveedor; baseUrl?: string; onDelta?: (texto: string) => void } = {},
+  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; proveedor?: Proveedor; baseUrl?: string; onDelta?: (texto: string) => void; abierto?: SpawnAbierto } = {},
 ): Promise<SpawnResult> {
   const r = loadConfig(root);
   if (!r.ok) return { ok: false, error: `config inválida (fail closed): ${r.error}`, ms: 0, proveedor: "?", model: "?" };
@@ -197,16 +200,29 @@ export async function spawn(
         body: JSON.stringify({ model: modelo, max_tokens: Math.min(c.maxChars, 4096), messages: [{ role: "user", content: task }] }),
         signal: ctrl.signal,
       });
-      const j = (await r.json()) as { content?: { text?: unknown }[]; error?: { message?: unknown }; usage?: { input_tokens?: unknown; output_tokens?: unknown } };
+      const j = (await r.json()) as { content?: { text?: unknown }[]; error?: { message?: unknown }; usage?: { input_tokens?: unknown; output_tokens?: unknown; cache_read_input_tokens?: unknown; cache_creation_input_tokens?: unknown } };
       const text = j.content?.map((b) => (typeof b.text === "string" ? b.text : "")).join("") ?? "";
       if (!r.ok || !text) {
         const d = typeof j.error?.message === "string" ? j.error.message : `HTTP ${r.status}`;
         return { ok: false, error: `anthropic: ${d}`.slice(0, 300), ms: Date.now() - t0, proveedor: "anthropic", model: modelo };
       }
       const truncada = text.length > budget.maxChars;
-      const usoA: UsoSpawn = typeof (j.usage?.input_tokens) === "number" && typeof (j.usage?.output_tokens) === "number"
-        ? { prompt: j.usage.input_tokens as number, respuesta: j.usage.output_tokens as number, total: (j.usage.input_tokens as number) + (j.usage.output_tokens as number), fuente: "medido" }
-        : usoEstimado(task, text);
+      // Anthropic informa la entrada en tres campos: `input_tokens` (fresca),
+      // `cache_read_input_tokens` y `cache_creation_input_tokens`. El prompt total
+      // facturable es la suma; los de cache quedan como desglose, igual que en
+      // OpenAI y Google, para que el costo se calcule con una sola fórmula.
+      const ua = j.usage;
+      let usoA: UsoSpawn;
+      if (typeof ua?.input_tokens === "number" && typeof ua?.output_tokens === "number") {
+        const lectura = typeof ua.cache_read_input_tokens === "number" && ua.cache_read_input_tokens > 0 ? ua.cache_read_input_tokens : 0;
+        const escritura = typeof ua.cache_creation_input_tokens === "number" && ua.cache_creation_input_tokens > 0 ? ua.cache_creation_input_tokens : 0;
+        const promptTotal = ua.input_tokens + lectura + escritura;
+        usoA = { prompt: promptTotal, respuesta: ua.output_tokens, total: promptTotal + ua.output_tokens, fuente: "medido" };
+        if (lectura) usoA.cacheLectura = lectura;
+        if (escritura) usoA.cacheEscritura = escritura;
+      } else {
+        usoA = usoEstimado(task, text);
+      }
       return { ok: true, text: truncada ? text.slice(0, budget.maxChars) : text, ms: Date.now() - t0, proveedor: "anthropic", model: modelo, truncada, uso: usoA };
     } catch (e) {
       const msg = e instanceof Error ? (e.name === "AbortError" ? `timeout ${budget.timeoutMs}ms` : e.message) : String(e);
@@ -228,7 +244,7 @@ export async function spawn(
         body: JSON.stringify({ contents: [{ parts: [{ text: task }] }] }),
         signal: ctrl.signal,
       });
-      const j = (await r.json()) as { candidates?: { content?: { parts?: { text?: unknown }[] } }[]; error?: { message?: unknown }; usageMetadata?: { promptTokenCount?: unknown; candidatesTokenCount?: unknown; totalTokenCount?: unknown } };
+      const j = (await r.json()) as { candidates?: { content?: { parts?: { text?: unknown }[] } }[]; error?: { message?: unknown }; usageMetadata?: { promptTokenCount?: unknown; candidatesTokenCount?: unknown; totalTokenCount?: unknown; cachedContentTokenCount?: unknown } };
       const text = j.candidates?.map((cd) => (cd.content?.parts ?? []).map((p) => (typeof p.text === "string" ? p.text : "")).join("")).join("") ?? "";
       if (!r.ok || !text) {
         const d = typeof j.error?.message === "string" ? j.error.message : `HTTP ${r.status}`;
@@ -236,9 +252,14 @@ export async function spawn(
       }
       const truncada = text.length > budget.maxChars;
       const ug = j.usageMetadata;
-      const usoG: UsoSpawn = typeof ug?.promptTokenCount === "number" && typeof ug?.candidatesTokenCount === "number"
-        ? { prompt: ug.promptTokenCount, respuesta: ug.candidatesTokenCount, total: typeof ug.totalTokenCount === "number" ? ug.totalTokenCount : (ug.promptTokenCount as number) + (ug.candidatesTokenCount as number), fuente: "medido" }
-        : usoEstimado(task, text);
+      let usoG: UsoSpawn;
+      if (typeof ug?.promptTokenCount === "number" && typeof ug?.candidatesTokenCount === "number") {
+        usoG = { prompt: ug.promptTokenCount, respuesta: ug.candidatesTokenCount, total: typeof ug.totalTokenCount === "number" ? ug.totalTokenCount : ug.promptTokenCount + ug.candidatesTokenCount, fuente: "medido" };
+        // `promptTokenCount` ya incluye los cacheados; el detalle es el subconjunto.
+        if (typeof ug.cachedContentTokenCount === "number" && ug.cachedContentTokenCount > 0) usoG.cacheLectura = ug.cachedContentTokenCount;
+      } else {
+        usoG = usoEstimado(task, text);
+      }
       return { ok: true, text: truncada ? text.slice(0, budget.maxChars) : text, ms: Date.now() - t0, proveedor: "google", model: modelo, truncada, uso: usoG };
     } catch (e) {
       const msg = e instanceof Error ? (e.name === "AbortError" ? `timeout ${budget.timeoutMs}ms` : e.message) : String(e);
@@ -257,15 +278,60 @@ export async function spawn(
   }
   if (prov === "litellm") return spawnLiteLLM(baseUrlDe(cfg), modelo, task, key, budget);
   const extra: Record<string, string> = prov === "openrouter" ? { "HTTP-Referer": "http://127.0.0.1/", "X-Title": "Axiom" } : {};
-  const s = await spawnOpenAICompat(prov, baseUrlDe(cfg), modelo, task, key, budget, extra, override.onDelta);
+  const s: SpawnResult = await spawnOpenAICompat(
+    prov,
+    baseUrlDe(cfg),
+    modelo,
+    task,
+    key,
+    budget,
+    extra,
+    override.onDelta,
+    override.abierto,
+  );
   // Key bien formada pero rechazada (revocada/de otra cuenta): el 401 de
   // OpenRouter llega sin pista; se lo explicamos en el propio error.
   if (!s.ok && s.error && /Missing Authentication header/i.test(s.error)) s.error += " — OpenRouter no reconoce esta key: crea una sk-or-v1-… en openrouter.ai/keys y guárdala en Configuración";
   return s;
 }
 
+// Único punto donde se agrega el costo: los drivers no leen `pricing.json` (no
+// tienen root) y devuelven uso crudo; acá se enriquece antes de que el resultado
+// salga al llamador.
+export async function spawn(
+  root: string,
+  task: string,
+  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; proveedor?: Proveedor; baseUrl?: string; onDelta?: (texto: string) => void; abierto?: SpawnAbierto } = {},
+): Promise<SpawnResult> {
+  return conCosto(root, await spawnSinCosto(root, task, override));
+}
+
+/**
+ * Equivalente de `spawn` con herramientas nativas. Detecta automáticamente el
+ * proveedor; si es un OpenAI-compatible que admita tool calls (openai/openrouter/
+ * litellm gateway), las manda como `tools` y el resultado incluye `toolCalls`
+ * cuando el modelo las emite. Anthropic, Google y Ollama devuelven herramientas
+ * vacías porque hoy no las envían por esta ruta.
+ */
+export async function spawnConTool(
+  root: string,
+  task: string,
+  herramientas: ToolDefinicion[],
+  override: { timeoutMs?: number; maxChars?: number; key?: string; model?: string; proveedor?: Proveedor; baseUrl?: string; onDelta?: (texto: string) => void; toolChoice?: "auto" | "none" | { type: "function"; function: { name: string } } } = {},
+): Promise<SpawnResult & { toolCalls?: ToolCallNativo[] }> {
+  const abierto: SpawnAbierto = {
+    herramientas,
+    toolChoice: override.toolChoice ?? undefined,
+  };
+  const s = await spawn(root, task, { ...override, abierto });
+  return {
+    ...s,
+    toolCalls: (s as SpawnResult & { toolCalls?: ToolCallNativo[] }).toolCalls,
+  };
+}
+
 export function formatSpawn(s: SpawnResult): string {
-  const tok = s.uso ? ` +${s.uso.total}tok(${s.uso.fuente})` : "";
+  const tok = s.uso ? ` +${s.uso.total}tok(${s.uso.fuente})${s.uso.costoUsd !== undefined ? ` $${s.uso.costoUsd}` : ""}` : "";
   if (!s.ok) return `spawn ${s.proveedor}/${s.model}: ERROR — ${s.error} (${s.ms}ms)${tok}`;
   const extra = s.truncada ? " [truncada a cap]" : "";
   return `spawn ${s.proveedor}/${s.model} (${s.ms}ms${tok})${extra}:\n${s.text ?? ""}`;

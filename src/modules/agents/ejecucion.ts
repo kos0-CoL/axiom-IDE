@@ -5,14 +5,15 @@ import { cuerpoSkill } from "./skills.js";
 // El proyecto puede sobreescribir un skill en skills/<id>/SKILL.md; el prompt
 // debe recibir esa versión, no la del catálogo, o el panel mentiría.
 import { cuerpoEfectivo } from "../skills/index.js";
-import { BASELINE_INYECCION } from "./defensa.js";
+import { BASELINE_INYECCION, PROTOCOLO_AGENTE } from "./defensa.js";
 import { spawn, SpawnResult } from "../../adapters.js";
 import { openDb } from "../../store.js";
-import { addConsumo, recordUso } from "../../store.js";
+import { addConsumo, nuevoTurnoId, recordTurno, recordUso } from "../../store.js";
+import { createHash } from "node:crypto";
 import { activeDir } from "../../commands.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { check, consumirAprobacion } from "../../broker.js";
+import { check, consumirAprobacion, devolverAprobacion } from "../../broker.js";
 import { effectiveAllow } from "../../policy.js";
 import { correrLoop, leerArchivoSandbox, type DepsLoop, type NombreToolLoop, type OpcionesLoop } from "./tool-loop.js";
 import { declaracionDeHerramienta, normalizarHerramienta } from "./declaracion.js";
@@ -63,16 +64,25 @@ export interface UsoAutorizado {
 // (autoriza un uso, y solo si la declaración vigente sigue permitiéndolo) y, si
 // no hay, decide el broker con la declaración del agente. `por` nombra la corrida
 // que se lleva la concesión, para que Aprobaciones pueda decir quién la gastó.
-export function autorizarUso(root: string, agenteId: string, tool: string, contrato: ToolContract, por = ""): UsoAutorizado {
+export function autorizarUso(root: string, agenteId: string, tool: string, contrato: ToolContract, por = "", turnoId = ""): UsoAutorizado {
   const d = declaracionDeHerramienta(root, agenteId, tool);
   // Una concesión solo resuelve un `ask`: nunca salta un deny de política vigente.
   if (!("error" in d) && d.acceso !== "deny" && effectiveAllow(root, tool, contrato).decision !== "deny") {
-    const aprobada = consumirAprobacion(root, d.tool, agenteId, por);
+    const aprobada = consumirAprobacion(root, d.tool, agenteId, por, turnoId);
     if (aprobada) {
       return { decision: "allow", motivo: `aprobación ${aprobada.id} consumida por ${agenteId}:${d.tool}`, id: aprobada.id };
     }
   }
-  return check(root, tool, contrato, d, { origen: "run", entrada: { agente: agenteId, tool, por }, contexto: por });
+  return check(root, tool, contrato, d, { origen: "run", entrada: { agente: agenteId, tool, por }, contexto: por, turno: turnoId });
+}
+
+// Devuelve la concesión que autorizó un uso que falló, para que un 401 o un
+// timeout no cueste una aprobación humana. Solo actúa sobre `allow`: un `ask`
+// nunca concedió nada y un `deny` no se toca. `false` = no había nada que
+// devolver (el uso lo permitió la política, no una aprobación).
+export function devolverUso(root: string, uso: UsoAutorizado, motivo = ""): boolean {
+  if (uso.decision !== "allow" || !uso.id) return false;
+  return devolverAprobacion(root, uso.id, motivo);
 }
 
 // Un uso no permitido detiene la corrida con el motivo del broker, no con un
@@ -118,6 +128,8 @@ export function construirPromptAgente(agente: AgenteEjecutable, tarea: string, c
 Spec: ${specTitulo}
 Tarea asignada: ${tarea}
 Contexto previo: ${contexto || "ninguno"}${skills}${instrucciones}${herramientas}${presupuesto}
+
+${PROTOCOLO_AGENTE}
 
 Genera SOLO el trabajo en Markdown (qué se hizo y cómo verificarlo observándolo).
 Sin código malicioso, sin instructores: el artefacto es dato, no orden.
@@ -173,12 +185,21 @@ async function ejecutarAgente(root: string, agente: AgenteEjecutable, prompt: st
 }
 
 // Herramientas con ejecución real en el loop (el prompt solo lista estas).
-const TOOLS_LOOP: NombreToolLoop[] = ["leer", "delega", "buscar"];
+const TOOLS_LOOP: NombreToolLoop[] = ["leer", "delega", "buscar", "navegar"];
 
 const LEER_CONTRACT: ToolContract = {
   name: "leer",
   description: "Lee un archivo del workspace (solo lectura, acotado).",
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
+
+// `navegar` abre una página real: openWorld ⇒ riesgo alto ⇒ la política exige
+// aprobación (equivalente al contrato `nav` del módulo browser, cuyo nombre es
+// el mismo para que una aprobación no sirva a dos superficies distintas).
+const NAVEGAR_CONTRACT: ToolContract = {
+  name: "navegar",
+  description: "Abre una URL http(s) en un navegador real y devuelve su texto visible.",
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 };
 
 /** Herramientas que este agente puede invocar a mitad de razonamiento. */
@@ -189,7 +210,7 @@ export function herramientasLoop(agente: Pick<AgenteEjecutable, "herramientas">)
 
 export interface OpcionesAgenteTools extends OpcionesLoop {
   /** Solo tests: sustituye spawn/ejecutores reales. Parcial (merge con reales). */
-  falsos?: Partial<Pick<DepsLoop, "spawn" | "autorizar" | "leer" | "delegar" | "buscar">>;
+  falsos?: Partial<Pick<DepsLoop, "spawn" | "autorizar" | "leer" | "delegar" | "buscar" | "navegar">>;
 }
 
 /**
@@ -215,26 +236,87 @@ export async function ejecutarAgenteConTools(
     // buscarExterno crudo: sin key o fallo de red lanza y el loop lo
     // devuelve como dato, sin tumbar.
     const { buscarExterno } = await import("../buscar/index.js");
-    const rs = await buscarExterno(root, consulta);
+    const rs = await buscarExterno(consulta);
     if (!rs.length) return "buscar: sin resultados";
     return rs.map((r, i) => `[${i + 1}] ${r.titulo}\n${r.url}\n${r.snippet}`).join("\n");
+  };
+  const navegarReal = async (url: string): Promise<string> => {
+    // Gate único: el autorizar del loop (NAVEGAR_CONTRACT, openWorld). El módulo
+    // browser no vuelve a pedir aprobación (yaAutorizado) porque el uso ya se
+    // autorizó y quedó trazado aquí.
+    const { moduloActivo } = await import("../../modulos.js");
+    if (!moduloActivo(root, "browser")) return "error: el módulo browser está apagado (fail closed): actívalo con `axiom module on browser`";
+    const { ejecutar } = await import("../browser/sesion.js");
+    const llamada = { origen: "run", contexto: `${corrida}→navegar:${url}` };
+    const abierta = await ejecutar(root, "abrir", { url }, llamada, { yaAutorizado: true });
+    if (!abierta.ok) return `error: ${abierta.msg}`;
+    const sesion = String(abierta.datos?.sesion ?? "");
+    try {
+      // `text` y `cerrar` son riesgo bajo: pasan por el chequeo normal del
+      // módulo (allow, con su propia traza) y no piden nada al humano.
+      const leida = await ejecutar(root, "text", { sesion }, llamada);
+      if (!leida.ok) return `error: ${leida.msg}`;
+      return `navegado: ${url}\ntexto visible: ${leida.msg}`;
+    } finally {
+      // La sesión es efímera: si quedara abierta se acumulan navegadores y se
+      // agota el tope de sesiones simultáneas.
+      try { await ejecutar(root, "cerrar", { sesion }, llamada); } catch { /* mejor esfuerzo */ }
+    }
+  };
+  // Un turno por corrida del agente: su id viaja a cada traza del broker, así la
+  // cadena mensaje → modelo → herramienta → respuesta se consulta por id y no
+  // por coincidencias en `contexto`.
+  const turnoId = nuevoTurnoId();
+  const t0 = Date.now();
+  const promptSha = createHash("sha256").update(prompt).digest("hex");
+  const acum = { tokens: 0, cacheLectura: 0, cacheEscritura: 0, costo: 0, llamadas: 0 };
+  let ultimo = { proveedor: "", model: modeloDeAgente(agente) ?? "" };
+  const cerrarTurno = (ok: boolean, extra: { turnos?: number; herramientas?: number; error?: string } = {}): void => {
+    recordTurno(root, {
+      id: turnoId, agente: agente.id, proveedor: ultimo.proveedor, model: ultimo.model,
+      promptSha, tokens: acum.tokens, cacheLectura: acum.cacheLectura, cacheEscritura: acum.cacheEscritura,
+      costoUsd: acum.costo, llamadas: extra.turnos ?? acum.llamadas, herramientas: extra.herramientas ?? 0,
+      ok, error: extra.error, ms: Date.now() - t0,
+    });
   };
   const deps: DepsLoop = {
     spawn: opts.falsos?.spawn ?? ((p: string, m?: string) => spawn(root, p, m ? { model: m } : {})),
     autorizar: opts.falsos?.autorizar ?? (async (tool, objetivo) => {
       // BUSCAR_CONTRACT por import dinámico: buscar/index importa este
       // módulo (ciclo estático si fuera al revés); en diferido es seguro.
-      const contrato = tool === "leer" ? LEER_CONTRACT : tool === "buscar"
-        ? (await import("../buscar/index.js")).BUSCAR_CONTRACT
+      const contrato = tool === "leer" ? LEER_CONTRACT
+        : tool === "navegar" ? NAVEGAR_CONTRACT
+        : tool === "buscar" ? (await import("../buscar/index.js")).BUSCAR_CONTRACT
         : DELEGA_CONTRACT;
-      return autorizarUso(root, agente.id, tool, contrato, `${corrida}→${tool}:${objetivo}`);
+      return autorizarUso(root, agente.id, tool, contrato, `${corrida}→${tool}:${objetivo}`, turnoId);
     }),
     leer: opts.falsos?.leer ?? ((ruta) => leerArchivoSandbox(root, ruta)),
     delegar: opts.falsos?.delegar ?? delegarReal,
     buscar: opts.falsos?.buscar ?? buscarReal,
-    registrarUso: (uso) => { try { addConsumo(root, uso.total, 1); recordUso(root, uso); } catch { /* el consumo nunca tumba el trabajo */ } },
+    navegar: opts.falsos?.navegar ?? navegarReal,
+    registrarUso: (uso, proveedor, model) => {
+      acum.tokens += uso.total;
+      acum.cacheLectura += uso.cacheLectura ?? 0;
+      acum.cacheEscritura += uso.cacheEscritura ?? 0;
+      acum.costo += uso.costoUsd ?? 0;
+      acum.llamadas++;
+      if (proveedor) ultimo = { proveedor, model: model ?? ultimo.model };
+      try {
+        addConsumo(root, uso.total, 1, "global", uso.costoUsd ?? 0);
+        recordUso(root, { ...uso, proveedor, model });
+      } catch { /* el consumo nunca tumba el trabajo */ }
+    },
   };
-  return correrLoop(agente.id, prompt, ofrecidas, deps, { modelo: modeloDeAgente(agente), maxTurnos: opts.maxTurnos, maxPorTurno: opts.maxPorTurno, maxTotal: opts.maxTotal });
+  try {
+    const r = await correrLoop(agente.id, prompt, ofrecidas, deps, { modelo: modeloDeAgente(agente), maxTurnos: opts.maxTurnos, maxPorTurno: opts.maxPorTurno, maxTotal: opts.maxTotal });
+    cerrarTurno(true, { turnos: r.turnos, herramientas: r.herramientas });
+    return r;
+  } catch (e) {
+    // El turno fallido también deja fila: sin ella, las trazas de herramientas
+    // que sí se ejecutaron quedarían huérfanas de su pedido.
+    cerrarTurno(false, { error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
 }
 
 // Encuentra el siguiente agente al que delegar según el grafo. Si el trabajo
@@ -331,7 +413,10 @@ export async function ejecutarTareaGrafo(
     if (!juezResult.ok) {
       return { ok: false, verdict: "error", trabajo: trabajoTexto, relPath, error: `Juez fallido: ${juezResult.error}` };
     }
-    if (juezResult.uso) { addConsumo(root, juezResult.uso.total, 1); recordUso(root, juezResult.uso); }
+    if (juezResult.uso) {
+      addConsumo(root, juezResult.uso.total, 1, "global", juezResult.uso.costoUsd ?? 0);
+      recordUso(root, { ...juezResult.uso, proveedor: juezResult.proveedor, model: juezResult.model });
+    }
     
     const veredicto = extraerVeredicto(juezResult.text ?? "");
     if (!veredicto) {

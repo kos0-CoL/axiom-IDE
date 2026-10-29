@@ -75,6 +75,9 @@ export const AGENTES_SEMILLA: readonly AgenteSemilla[] = [
       { tool: "leer", acceso: "allow" },
       { tool: "buscar", acceso: "allow" },
       { tool: "delega", acceso: "allow" },
+      // Puede abrir una página servida del proyecto y leerla. `ask` porque
+      // navegar es riesgo alto: la política sigue decidiendo (no concede nada).
+      { tool: "navegar", acceso: "ask" },
     ],
   },
   {

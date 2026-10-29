@@ -52,8 +52,8 @@ function componer(base: Veredicto, agente?: DeclaracionAgente): Veredicto {
 // sin ese dato, «usada» en la vista es un estado sin explicación.
 // ALTER best-effort para bases ya creadas.
 function prepararTabla(db: ReturnType<typeof openDb>): void {
-  db.exec("CREATE TABLE IF NOT EXISTS aprobaciones(id TEXT PRIMARY KEY, tool TEXT, riesgo TEXT, estado TEXT, created_at TEXT, decided_by TEXT, decided_at TEXT, agente TEXT, usada_at TEXT, usada_por TEXT)");
-  for (const col of ["decided_by TEXT", "decided_at TEXT", "agente TEXT", "usada_at TEXT", "usada_por TEXT"]) {
+  db.exec("CREATE TABLE IF NOT EXISTS aprobaciones(id TEXT PRIMARY KEY, tool TEXT, riesgo TEXT, estado TEXT, created_at TEXT, decided_by TEXT, decided_at TEXT, agente TEXT, usada_at TEXT, usada_por TEXT, devuelta_at TEXT, devuelta_por TEXT)");
+  for (const col of ["decided_by TEXT", "decided_at TEXT", "agente TEXT", "usada_at TEXT", "usada_por TEXT", "devuelta_at TEXT", "devuelta_por TEXT"]) {
     try { db.exec(`ALTER TABLE aprobaciones ADD COLUMN ${col}`); } catch { /* ya existe */ }
   }
 }
@@ -68,7 +68,7 @@ const VIGENCIA_MIN = 30;
 // gastó, que es lo que la vista necesita para explicar el estado `usada`.
 // Devuelve la aprobación consumida o undefined (no había, la tomó otro proceso o
 // está fuera de vigencia).
-export function consumirAprobacion(root: string, tool: string, agente: string, por = ""): { id: string } | undefined {
+export function consumirAprobacion(root: string, tool: string, agente: string, por = "", turnoId = ""): { id: string } | undefined {
   const db = openDb(root);
   try {
     prepararTabla(db);
@@ -87,7 +87,7 @@ export function consumirAprobacion(root: string, tool: string, agente: string, p
         origen: "run", tool, agente, decision: "allow",
         motivo: `aprobación ${row.id} consumida por ${agente}:${tool}`,
         approvalId: row.id, entrada: { tool, agente, por }, salida: { consumida: true },
-        contexto: por, ok: true,
+        contexto: por, turnoId, ok: true,
       });
     }
     return consumida ? { id: row.id } : undefined;
@@ -193,6 +193,62 @@ export function decide(
   return { ok: aprueba, msg: `${id} ${aprueba ? "aprobada" : "rechazada"} (${row.tool}, riesgo ${row.riesgo}${cota})`, estado: aprueba ? "aprobada" : "rechazada", aplicada: true };
 }
 
+// Revoca una concesión que nadie llegó a gastar. La vigencia de 30 min es para
+// el humano que aprueba mirando Aprobaciones; un reintento automático del chat no
+// puede heredar esa ventana: si el plan que la pidió termina sin usar la búsqueda
+// (el enrich no llegó a correr, la declaración del agente cambió entre la
+// concesión y el uso, el proveedor devolvió una respuesta cortada), dejar la fila
+// en `aprobada` autorizaría un uso que ya nadie está aprobando. Solo toca
+// `aprobada`:
+// `pendiente` se cierra con `decide`, y usada/rechazada/expirada ya tienen dueño.
+// El estado `revocada` no se confunde con un rechazo humano (`rechazada`) ni con
+// una denegación del broker (`denegada-*`).
+export function revocarAprobacion(root: string, id: string): { ok: boolean; revocada: boolean; estado: string; msg: string } {
+  const db = openDb(root);
+  try {
+    prepararTabla(db);
+    const row = db.prepare("SELECT estado FROM aprobaciones WHERE id=?").get(id) as { estado?: string } | undefined;
+    if (!row) return { ok: false, revocada: false, estado: "no-existe", msg: `aprobación ${id} no existe` };
+    if (row.estado !== "aprobada") return { ok: true, revocada: false, estado: String(row.estado), msg: `aprobación ${id} ${row.estado}: no hay concesión que revocar` };
+    // Una concesión que ya se intentó usar y falló no se revoca al terminar el
+    // reintento: el permiso existe, el intento existió y el fallo fue de la
+    // herramienta, no del humano. Revocarla lo obligaria a aprobar de nuevo por
+    // un 401 o un timeout.
+    const devuelta = db.prepare("SELECT devuelta_at FROM aprobaciones WHERE id=?").get(id) as { devuelta_at?: string | null } | undefined;
+    if (devuelta?.devuelta_at) return { ok: true, revocada: false, estado: "aprobada", msg: `aprobación ${id} se conserva aprobada: el uso falló (${devuelta.devuelta_at}) y el intento ya existió` };
+    // CAS sobre el estado: si el runner la consume en paralelo, gana uno solo.
+    const marca = db.prepare("UPDATE aprobaciones SET estado='revocada', decided_by=?, decided_at=? WHERE id=? AND estado='aprobada'").run("reintento", new Date().toISOString(), id);
+    if (Number(marca.changes ?? 0) === 0) return { ok: false, revocada: false, estado: "usada", msg: `aprobación ${id} ya la consumió otro uso` };
+    return { ok: true, revocada: true, estado: "revocada", msg: `aprobación ${id} revocada: el reintento terminó sin usarla` };
+  } catch {
+    return { ok: false, revocada: false, estado: "error", msg: `aprobación ${id} no se pudo revocar` };
+  } finally {
+    db.close();
+  }
+}
+
+// Devuelve a `aprobada` una concesión gastada en un uso que falló (EXA 401,
+// timeout): el permiso era para ejecutar la herramienta, no para un intento que
+// no produjo nada. Marca `devuelta_at`/`devuelta_por` como evidencia de que el
+// intento existió —así el estado no cambia sin explicación y `revocarAprobacion`
+// sabe que no debe cerrarla al terminar el reintento— y deja la fila consumible
+// otra vez mientras siga en vigencia. No escribe traza: la fila ya cuenta el
+// intento y una tool call fallida con `decision: allow` mentiría.
+export function devolverAprobacion(root: string, id: string, motivo = ""): boolean {
+  const db = openDb(root);
+  try {
+    prepararTabla(db);
+    const marca = db.prepare(
+      "UPDATE aprobaciones SET estado='aprobada', usada_at=NULL, usada_por=NULL, devuelta_at=?, devuelta_por=? WHERE id=? AND estado='usada'",
+    ).run(new Date().toISOString(), motivo.slice(0, 200), id);
+    return Number(marca.changes ?? 0) > 0;
+  } catch {
+    return false;
+  } finally {
+    db.close();
+  }
+}
+
 // Contexto opcional de la llamada para la traza (AXM-066): quién origina la
 // tool call y con qué IO de entrada. Los llamadores existentes son compatibles
 // porque el parámetro es opcional.
@@ -200,6 +256,8 @@ export interface LlamadaTrazable {
   origen?: string; // cli | web | run | telegram | handoff
   entrada?: unknown;
   contexto?: string; // p. ej. "run <spec>/<tarea>"
+  /** Turno que originó la llamada (correlación con `turnos`). */
+  turno?: string;
 }
 
 export function check(
@@ -255,6 +313,7 @@ export function check(
     entrada: llamada?.entrada ?? {},
     salida: { decision: r.decision, id: id ?? null },
     contexto: llamada?.contexto ?? "",
+    turnoId: llamada?.turno ?? "",
     ok: r.decision === "allow",
     ms: Date.now() - t0,
   });

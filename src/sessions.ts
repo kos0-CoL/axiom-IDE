@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { openDb } from "./store.js";
+// La web no importa `store` directo (boundary): el turno se registra por la
+// misma fachada que la sesión que lo contiene.
+export { nuevoTurnoId, recordTurno } from "./store.js";
 // Texto puro del harness (baseline anti-inyección): el chat lo inyecta igual que el grafo.
-import { BASELINE_INYECCION } from "./modules/agents/defensa.js";
+import { BASELINE_INYECCION, PROTOCOLO_CHAT, PROTOCOLO_CHAT_CORTO } from "./modules/agents/defensa.js";
 
 // Sesiones de chat por proyecto (F2): historial persistente en SQLite.
 // El store del proyecto vive en <root>/axiom.db; cambiar de proyecto = otro root.
@@ -30,6 +33,8 @@ export interface Mensaje {
   skill: string;
   ms: number;
   tokens: number;
+  /** USD del turno, solo si `pricing.json` declara precio para ese modelo. */
+  costo_usd: number | null;
   created_at: string;
 }
 
@@ -151,19 +156,19 @@ export function mensajesDe(root: string, id: string, limit = 200): { ok: true; m
   if (!cur.ok) return cur;
   const n = Number.isInteger(limit) && limit > 0 && limit <= 500 ? limit : 200;
   const db = openDb(root);
-  const rows = db.prepare("SELECT id,session_id,rol,texto,proveedor,model,skill,ms,tokens,created_at FROM chat_messages WHERE session_id=? ORDER BY id ASC LIMIT ?").all(id, n) as unknown as Mensaje[];
+  const rows = db.prepare("SELECT id,session_id,rol,texto,proveedor,model,skill,ms,tokens,costo_usd,created_at FROM chat_messages WHERE session_id=? ORDER BY id ASC LIMIT ?").all(id, n) as unknown as Mensaje[];
   db.close();
   return { ok: true, mensajes: rows };
 }
 
 // Uso agregado de la sesión para el header del chat: tokens totales y llamadas con respuesta.
-export function usoSesion(root: string, id: string): { ok: true; tokens: number; llamadas: number } | Fail {
+export function usoSesion(root: string, id: string): { ok: true; tokens: number; llamadas: number; costo: number } | Fail {
   const cur = obtenerSesion(root, id);
   if (!cur.ok) return cur;
   const db = openDb(root);
-  const r = db.prepare("SELECT COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(CASE WHEN rol='asistente' THEN 1 ELSE 0 END),0) AS llamadas FROM chat_messages WHERE session_id=?").get(id) as { tokens: number; llamadas: number };
+  const r = db.prepare("SELECT COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(CASE WHEN rol='asistente' THEN 1 ELSE 0 END),0) AS llamadas, COALESCE(SUM(costo_usd),0) AS costo FROM chat_messages WHERE session_id=?").get(id) as { tokens: number; llamadas: number; costo: number };
   db.close();
-  return { ok: true, tokens: r.tokens ?? 0, llamadas: r.llamadas ?? 0 };
+  return { ok: true, tokens: r.tokens ?? 0, llamadas: r.llamadas ?? 0, costo: r.costo ?? 0 };
 }
 
 export function guardarMensaje(
@@ -171,7 +176,7 @@ export function guardarMensaje(
   sessionId: string,
   rol: "usuario" | "asistente" | "sistema",
   texto: string,
-  meta: { proveedor?: string; model?: string; skill?: string; ms?: number; tokens?: number } = {},
+  meta: { proveedor?: string; model?: string; skill?: string; ms?: number; tokens?: number; costoUsd?: number } = {},
 ): { ok: true; id: number } | Fail {
   if (rol !== "usuario" && rol !== "asistente" && rol !== "sistema") return { ok: false, error: "rol inválido" };
   const t = texto.trim();
@@ -179,8 +184,10 @@ export function guardarMensaje(
   const cur = obtenerSesion(root, sessionId);
   if (!cur.ok) return cur;
   const db = openDb(root);
-  const r = db.prepare("INSERT INTO chat_messages(session_id,rol,texto,proveedor,model,skill,ms,tokens,created_at) VALUES(?,?,?,?,?,?,?,?,?)").run(
-    sessionId, rol, t.slice(0, 20000), meta.proveedor ?? "", meta.model ?? "", (meta.skill ?? "").slice(0, 64), meta.ms ?? 0, meta.tokens && meta.tokens > 0 ? Math.round(meta.tokens) : 0, ahora(),
+  const r = db.prepare("INSERT INTO chat_messages(session_id,rol,texto,proveedor,model,skill,ms,tokens,costo_usd,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+    sessionId, rol, t.slice(0, 20000), meta.proveedor ?? "", meta.model ?? "", (meta.skill ?? "").slice(0, 64), meta.ms ?? 0, meta.tokens && meta.tokens > 0 ? Math.round(meta.tokens) : 0,
+    typeof meta.costoUsd === "number" && Number.isFinite(meta.costoUsd) ? meta.costoUsd : null,
+    ahora(),
   );
   db.prepare("UPDATE chat_sessions SET updated_at=? WHERE id=?").run(ahora(), sessionId);
   db.close();
@@ -260,14 +267,28 @@ export interface ExtraPrompt {
   skillDescripcion?: string;
 }
 
+// Voseo y pretérito acentúan donde el tuteo no: «arreglá»/«revisá»/«implementá»
+// son la misma orden que «arregla»/«revisa»/«implementa». Se compara sin
+// diacríticos para no mantener dos listas de verbos que se desincronizan.
+function sinAcentos(s: string): string {
+  return s.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
 // P1 intent-gate (derroche PLAN en trivial): saludo/texto corto sin verbo de
 // tarea → respuesta directa 1-2 líneas, sin plan numerado ni oferta de Build.
-const VERBO_TAREA = /\b(haz|crea|implementa|arregla|corrige|explica|analiza|revisa|busca|escribe|genera|añade|agrega|quita|borra|cambia|mueve|actualiza|comprueba|verifica|ejecuta|corre|prueba|dime|dame|pon|muestra|lista|resume|compara|traduce|optimiza|refactoriza|instala|configura|diseña|investiga|planifica)\b/i;
+const VERBOS_TAREA =
+  "haz|hacé|crea|creá|implementa|implementá|arregla|arreglá|corrige|corregí|explica|explicá|analiza|analizá|revisa|revisá|busca|buscá|escribe|escribí|genera|generá|añade|añadí|agrega|agregá|quita|quitá|borra|borrá|cambia|cambiá|mueve|mové|actualiza|actualizá|comprueba|comprobá|verifica|verificá|ejecuta|ejecutá|corre|prueba|probá|mide|medí|dime|decí|dame|pon|muestra|mostrá|lista|listá|resume|resumí|compara|compará|traduce|traducí|define|definí|optimiza|optimizá|refactoriza|refactorizá|instala|instalá|configura|configurá|diseña|diseñá|investiga|investigá|planifica|planificá|contame|mirá|fijate|cambiame"
+  ""  // «arreglame», «revisalo», «decímelo», «contame», «fijate», «mirá»: el voseo pega el pronombre al verbo, así
+// que el límite de palabra del verbo no cae donde parece. Se aceptan hasta dos
+// enclíticos (los más largos primero para que «melo» no se parta en «me»+«lo»).
+// El `\\b` final sigue impidiendo que «creativo» o «listado» cuenten como orden.
+const ENCLITICOS = "melo|mela|selo|sela|nos|me|te|se|lo|la|le|los|las|les|sí|te|sí|sí|sí|os";
+const VERBO_TAREA = new RegExp(`\\b(?:${sinAcentos(VERBOS_TAREA)})(?:${ENCLITICOS}){0,2}\\b`, "i");
 
 export function esTrivial(texto: string): boolean {
   const t = texto.trim();
   if (!t || t.length >= 30) return false;
-  return !VERBO_TAREA.test(t);
+  return !VERBO_TAREA.test(sinAcentos(t));
 }
 
 // El modo cambia el encargo al proveedor; la skill enfoca la respuesta. Sin herramientas reales aún (fase posterior).
@@ -282,14 +303,18 @@ export function promptPara(modo: ModoChat, skill: string, texto: string, extra: 
   // El chat también recibe contenido del proyecto (historial, archivos): misma defensa
   // anti-inyección que agentes y juez, para no dejar una superficie sin cubrir.
   const defensa = `\n\n${BASELINE_INYECCION}`;
+  // El protocolo va antes que el historial: las órdenes preceden a los datos.
+  // En un turno trivial se manda la versión de dos líneas: el bloque completo son
+  // ~400 tokens por mensaje, y en un saludo no cambian ninguna decisión.
+  const proto = `\n\n${esTrivial(texto) ? PROTOCOLO_CHAT_CORTO : PROTOCOLO_CHAT}`;
   // La constitución manda sobre el pedido (plan y build la reciben como
   // restricción, igual que spec-kit en specify/plan/implement; ask queda fuera).
   const cons = (extra.constitucion ?? "").trim().slice(0, 2000);
   const bloqueCons = cons ? `\n\n${cons}` : "";
-  if (modo === "ask") return `${cab}${foco}Responde a la pregunta de forma directa y concisa. Solo lectura: no ejecutes nada ni propongas actuar; si falta información, dilo.${ctx}\n\nPregunta: ${texto}${defensa}`;
+  if (modo === "ask") return `${cab}${foco}Responde a la pregunta de forma directa y concisa. Solo lectura: no ejecutes nada ni propongas actuar; si falta información, dilo.${proto}${ctx}\n\nPregunta: ${texto}${defensa}`;
   if (modo === "plan") {
-    if (esTrivial(texto)) return `${cab}${foco}Responde de forma directa y breve (1-2 líneas), como un saludo o acuse. No elabores un plan numerado ni ofrezcas pasar a Build; solo si el mensaje insinúa una tarea pendiente, ofrece convertirlo en plan.${ctx}\n\nMensaje: ${texto}${defensa}`;
-    return `${cab}${foco}Investiga lo necesario y responde ÚNICAMENTE con un plan numerado de pasos, revisable por un humano. No ejecutes nada. Termina ofreciendo pasar a Build.${bloqueCons}${ctx}\n\nObjetivo: ${texto}${defensa}`;
+    if (esTrivial(texto)) return `${cab}${foco}Responde de forma directa y breve (1-2 líneas), como un saludo o acuse. No elabores un plan numerado ni ofrezcas pasar a Build; solo si el mensaje insinúa una tarea pendiente, ofrece convertirlo en plan.${proto}${ctx}\n\nMensaje: ${texto}${defensa}`;
+    return `${cab}${foco}Investiga lo necesario y responde ÚNICAMENTE con un plan numerado de pasos, revisable por un humano. No ejecutes nada. Termina ofreciendo pasar a Build.${bloqueCons}${proto}${ctx}\n\nObjetivo: ${texto}${defensa}`;
   }
-  return `${cab}${foco}${bloqueCons ? `${bloqueCons}\n\n` : ""}${texto}${ctx}${defensa}`;
+  return `${cab}${foco}${bloqueCons ? `${bloqueCons}\n\n` : ""}${proto}\n\n${texto}${ctx}${defensa}`;
 }

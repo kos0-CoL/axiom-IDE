@@ -33,7 +33,7 @@ try {
   delete process.env.EXA_API_KEY;
   const sinKey = await buscarSinKey();
   async function buscarSinKey() {
-    const r = await import("../dist/modules/buscar/index.js").then((m) => m.buscarExterno(root, "x", { fetchFn: stub }).then(
+    const r = await import("../dist/modules/buscar/index.js").then((m) => m.buscarExterno("x", { fetchFn: stub }).then(
       () => ({ estado: "inesperado" }),
       (e) => ({ estado: /EXA_API_KEY/.test(e.message) ? "denegado" : "otro" }),
     ));

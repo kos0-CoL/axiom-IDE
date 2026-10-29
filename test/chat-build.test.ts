@@ -90,8 +90,8 @@ test("reenviado persiste la línea de sistema con intento y error original", asy
       await post("/api/chat/enviar", { session_id: sessionId, modo: "ask", texto: "otra", reenviado: true });
       await post("/api/chat/enviar", { session_id: sessionId, modo: "ask", texto: "más", reenviado: true, intento: 9, error_previo: "   " });
       const list = await get(`/api/chat/sesiones/${sessionId}/mensajes`);
-      const parsed = JSON.parse(list.body) as { mensajes: { rol: string; texto: string }[]; uso?: { ok: boolean; tokens: number; llamadas: number } };
-      assert.deepEqual(parsed.uso, { ok: true, tokens: 0, llamadas: 0 }, "el historial trae el uso agregado de la sesión");
+      const parsed = JSON.parse(list.body) as { mensajes: { rol: string; texto: string }[]; uso?: { ok: boolean; tokens: number; llamadas: number; costo: number } };
+      assert.deepEqual(parsed.uso, { ok: true, tokens: 0, llamadas: 0, costo: 0 }, "el historial trae el uso agregado de la sesión");
       const mensajes = parsed.mensajes;
       const lineas = mensajes.filter((m) => m.rol === "sistema").map((m) => m.texto);
       const reenvios = lineas.filter((t) => t.startsWith("Mensaje reenviado tras error"));
@@ -177,7 +177,7 @@ test("uso del chat: tokens por mensaje, agregado de sesión y migración de DBs 
       assert.equal(msgs.mensajes[1].tokens, 2100, "el mensaje del asistente guarda lo informado por el proveedor");
     }
     guardarMensaje(root, "s-uso", "asistente", "resp 2", { proveedor: "openrouter", model: "m", ms: 80, tokens: 43.7 });
-    assert.deepEqual(usoSesion(root, "s-uso"), { ok: true, tokens: 2144, llamadas: 2 }, "agregado: tokens sumados y llamadas solo del asistente");
+    assert.deepEqual(usoSesion(root, "s-uso"), { ok: true, tokens: 2144, llamadas: 2, costo: 0 }, "agregado: tokens sumados y llamadas solo del asistente");
     assert.equal(usoSesion(root, "s-inexistente").ok, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

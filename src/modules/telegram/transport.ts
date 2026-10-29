@@ -1,5 +1,7 @@
 // Módulo telegram — transporte: formato + Bot API HTTP. Sin broker, sin SQLite.
 // El token NUNCA va en repo/args/logs: solo env AXIOM_TELEGRAM_BOT_TOKEN.
+import { ENV, valorEnv } from "../../env.js";
+
 export interface ApprovalMsg { id: string; tool: string; riesgo: string; motivo: string; expiraMin: number }
 
 export function formatApproval(m: ApprovalMsg): string {
@@ -79,14 +81,14 @@ export function parseUpdate(body: unknown): ParsedUpdate {
 }
 
 // --- Bot API (fetch nativo, sin deps) ---
-export function tokenFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const t = (env.AXIOM_TELEGRAM_BOT_TOKEN ?? "").trim();
-  return t ? t : undefined;
+// `env` opcional: sin argumento, `valorEnv` resuelve `process.env` en un solo
+// lugar (`src/env.ts`), no acá.
+export function tokenFromEnv(env?: NodeJS.ProcessEnv): string | undefined {
+  return valorEnv(ENV.AXIOM_TELEGRAM_BOT_TOKEN, env);
 }
 
-export function webhookSecretFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const s = (env.AXIOM_TELEGRAM_WEBHOOK_SECRET ?? "").trim();
-  return s ? s : undefined;
+export function webhookSecretFromEnv(env?: NodeJS.ProcessEnv): string | undefined {
+  return valorEnv(ENV.AXIOM_TELEGRAM_WEBHOOK_SECRET, env);
 }
 
 interface ApiResult {

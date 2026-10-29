@@ -29,7 +29,19 @@ export function effectiveAllow(root: string, toolName: string, tool?: ToolContra
   else if (toolName === "read" || toolName === "status" || toolName === "validate-spec") riesgo = "bajo";
 
   if (g === false) return { decision: "deny", riesgo, motivo: `global.tools.${toolName}=false (no eludible)` };
-  if (riesgo === "alto") return { decision: g === true && p !== false ? "ask" : "deny", riesgo, motivo: "riesgo alto exige aprobación humana" };
+  if (riesgo === "alto") {
+    // Un deny de riesgo alto casi nunca es «falta aprobar»: es que la
+    // herramienta no está habilitada, y sin ese dato el motivo manda a aprobar
+    // algo que nadie pidió. Cuando sí está habilitada, el ask crea la solicitud
+    // y el motivo nombra la palanca correcta en cada caso.
+    const abierta = g === true && p !== false;
+    const motivo = abierta
+      ? "riesgo alto exige aprobación humana"
+      : g === true
+        ? `riesgo alto y el proyecto la deshabilita: tools.${toolName}=false en project.json`
+        : `riesgo alto y la herramienta no está habilitada: agregá tools.${toolName}=true en policies.global.json`;
+    return { decision: abierta ? "ask" : "deny", riesgo, motivo };
+  }
   if (riesgo === "medio") {
     if (g === true && p === true) return { decision: "allow", riesgo, motivo: "global+proyecto permiten" };
     if (g === true && p === undefined) return { decision: "ask", riesgo, motivo: "proyecto no define, se pregunta" };

@@ -2594,6 +2594,132 @@
           }
         }
       }
+    },
+    "/api/plan/investigar": {
+      "post": {
+        "operationId": "planInvestigar",
+        "summary": "Busca referencias del plan y propone 3-5 preguntas de aclaración",
+        "description": "Investigación gateada por el broker: si `buscar` queda en ask, la aprobación se concede y se consume en esta misma llamada (el clic es la aprobación). Las referencias se escriben en `## Referencias externas` de la spec y las preguntas quedan en `specs/active/<id>/preguntas.json` para poder retomarlas al reabrir el chat.",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanInvestigarIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Investigación hecha (con o sin preguntas)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanInvestigarOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "spec inexistente, búsqueda denegada o sin objetivo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/preguntas": {
+      "get": {
+        "operationId": "planPreguntas",
+        "summary": "Preguntas guardadas de un plan (para rearmar el formulario al reabrir)",
+        "description": "Devuelve lo que quedó en `specs/active/<id>/preguntas.json`: las preguntas con su `estado` (`pendiente` o `respondida`), el conteo de referencias que las originaron y la ruta de la spec. Solo lectura: si la spec no tiene preguntas guardadas (o el id es inválido) responde 404, y el chat entonces no rearma ningún formulario.",
+        "tags": [
+          "chat"
+        ],
+        "parameters": [
+          {
+            "name": "spec",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preguntas guardadas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanPreguntasOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "sin preguntas guardadas para esa spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan/respuestas": {
+      "post": {
+        "operationId": "planRespuestas",
+        "summary": "Anota las respuestas de aclaración en la spec del plan",
+        "description": "Sustituye/anota cada respuesta en `## Clarifications` de la spec y marca las preguntas como respondidas (una sola vez).",
+        "tags": [
+          "chat"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanRespuestasIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Respuestas anotadas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanRespuestasOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "sin preguntas guardadas, ya respondidas o spec inexistente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2733,12 +2859,18 @@
             "items": {
               "type": "object",
               "properties": {
-                "id": { "type": "string" },
-                "tool": { "type": "string" },
-                "riesgo": { "type": "string" },
+                "id": {
+                  "type": "string"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "riesgo": {
+                  "type": "string"
+                },
                 "estado": {
                   "type": "string",
-                  "description": "pendiente|aprobada|rechazada|usada|expirada|denegada-por-politica|denegada-por-agente|denegada-sin-agente. `usada` = concesión ya gastada por su único uso."
+                  "description": "pendiente|aprobada|rechazada|usada|revocada|expirada|denegada-por-politica|denegada-por-agente|denegada-sin-agente. `usada` = concesión ya gastada por su único uso; `revocada` = la concedió un reintento del chat y terminó sin gastarla (no es un rechazo humano)."
                 },
                 "agente": {
                   "type": "string",
@@ -4030,6 +4162,10 @@
           },
           "timeoutMs": {
             "type": "integer"
+          },
+          "aprobacion": {
+            "type": "string",
+            "description": "Id (8 hex) de la aprobación pendiente que el aviso de búsqueda mostró en el chat. El servidor la concede para esta corrida y la revoca al terminar si la búsqueda no llegó a gastarla, para que un plan que falla no deje la aprobación viva."
           }
         }
       },
@@ -4224,6 +4360,171 @@
               "medido",
               "estimado"
             ]
+          }
+        }
+      },
+      "PreguntaPlan": {
+        "type": "object",
+        "required": [
+          "id",
+          "pregunta",
+          "motivo"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "pregunta": {
+            "type": "string"
+          },
+          "motivo": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanInvestigarIn": {
+        "type": "object",
+        "required": [
+          "spec_id"
+        ],
+        "properties": {
+          "spec_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanInvestigarOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "spec_id",
+          "referencias",
+          "preguntas"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "spec_id": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "referencias": {
+            "type": "integer"
+          },
+          "preguntas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreguntaPlan"
+            }
+          },
+          "aviso": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanPreguntasOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "spec_id",
+          "estado",
+          "preguntas"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "spec_id": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "pendiente",
+              "respondida"
+            ]
+          },
+          "referencias": {
+            "type": "integer"
+          },
+          "preguntas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreguntaPlan"
+            }
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanRespuestasIn": {
+        "type": "object",
+        "required": [
+          "spec_id",
+          "respuestas"
+        ],
+        "properties": {
+          "spec_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "respuestas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "respuesta"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "respuesta": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PlanRespuestasOut": {
+        "type": "object",
+        "required": [
+          "ok",
+          "respondidas",
+          "omitidas",
+          "spec"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "respondidas": {
+            "type": "integer"
+          },
+          "omitidas": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
           }
         }
       }

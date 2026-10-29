@@ -1,10 +1,44 @@
 // Adapter litellm — gateway OpenAI-compatible vía HTTP nativo.
 // La key SOLO por env AXIOM_LITELLM_KEY: nunca en repo, args, config ni logs.
+import { ENV, valorEnv } from "../../env.js";
+
 export interface UsoSpawn {
   prompt: number;
   respuesta: number;
   total: number;
   fuente: "medido" | "estimado";
+  /** Subconjunto de `prompt` leído de cache (OpenAI/Google) ya sumado en `prompt`. */
+  cacheLectura?: number;
+  /** Tokens escritos en cache (Anthropic). Ya sumados en `prompt`. */
+  cacheEscritura?: number;
+  /** USD de esta llamada, solo si `pricing.json` declara precio para el modelo. */
+  costoUsd?: number;
+}
+
+export interface UsoOpenAIBruto {
+  prompt_tokens?: unknown;
+  completion_tokens?: unknown;
+  total_tokens?: unknown;
+  prompt_tokens_details?: { cached_tokens?: unknown };
+}
+
+/**
+ * `usage` de un cuerpo OpenAI-compatible → `UsoSpawn`.
+ * `prompt_tokens` ya incluye los cacheados; `cached_tokens` es su subconjunto.
+ * Sin prompt y completion numéricos no hay medición: devuelve undefined para que
+ * el llamador estime en vez de inventar ceros.
+ */
+export function usoOpenAI(u: UsoOpenAIBruto | undefined): UsoSpawn | undefined {
+  if (typeof u?.prompt_tokens !== "number" || typeof u?.completion_tokens !== "number") return undefined;
+  const uso: UsoSpawn = {
+    prompt: u.prompt_tokens,
+    respuesta: u.completion_tokens,
+    total: typeof u.total_tokens === "number" ? u.total_tokens : u.prompt_tokens + u.completion_tokens,
+    fuente: "medido",
+  };
+  const cache = u.prompt_tokens_details?.cached_tokens;
+  if (typeof cache === "number" && cache > 0) uso.cacheLectura = cache;
+  return uso;
 }
 
 export interface SpawnResult {
@@ -32,12 +66,18 @@ export function usoEstimado(prompt: string, respuesta: string): UsoSpawn {
 // Los drivers OpenAI-compat añaden /v1/...: acepta la base con /v1 pegado (formato que
 // dan OpenRouter/OpenAI al copiar) sin producir .../v1/v1/... (404). Identidad si no lleva /v1.
 export function normalizaBase(baseUrl: string): string {
-  return baseUrl.replace(/\/$/, "").replace(/\/v1$/, "");
+  // El usuario pega la base desde Ajustes → Proveedor LLM. Si arrastra
+  // espacios finales (copiar y pegar), terminar en `/v1` o en `/` se vuelve
+  // invisible y la concatenación da `.../api/v1  /v1/chat/completions`:
+  // el proveedor responde «Not Found» y parece un fallo del modelo o de la
+  // key. Se recorta antes de comparar para que el resultado no dependa de
+  // un espacio de más; el orden cubre `.../v1/` y `.../v1`.
+  return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "");
 }
 
-export function litellmKeyFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const k = (env.AXIOM_LITELLM_KEY ?? "").trim();
-  return k ? k : undefined;
+// `env` opcional: sin argumento, `valorEnv` resuelve `process.env` en `src/env.ts`.
+export function litellmKeyFromEnv(env?: NodeJS.ProcessEnv): string | undefined {
+  return valorEnv(ENV.AXIOM_LITELLM_KEY, env);
 }
 
 export async function spawnLiteLLM(
@@ -57,7 +97,7 @@ export async function spawnLiteLLM(
       body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
       signal: ctrl.signal,
     });
-    let j: { choices?: { message?: { content?: unknown } }[]; error?: { message?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown } } = {};
+    let j: { choices?: { message?: { content?: unknown } }[]; error?: { message?: unknown }; usage?: UsoOpenAIBruto } = {};
     try {
       j = (await r.json()) as typeof j;
     } catch {
@@ -70,10 +110,7 @@ export async function spawnLiteLLM(
       return { ok: false, error: `litellm: ${d}`.slice(0, 300), ms: Date.now() - t0, proveedor: "litellm", model, uso: { prompt: up, respuesta: 0, total: up, fuente: "estimado" } };
     }
     const truncada = content.length > opts.maxChars;
-    const u = j.usage;
-    const uso: UsoSpawn = typeof u?.prompt_tokens === "number" && typeof u?.completion_tokens === "number"
-      ? { prompt: u.prompt_tokens, respuesta: u.completion_tokens, total: typeof u.total_tokens === "number" ? u.total_tokens : u.prompt_tokens + u.completion_tokens, fuente: "medido" }
-      : usoEstimado(prompt, content);
+    const uso: UsoSpawn = usoOpenAI(j.usage) ?? usoEstimado(prompt, content);
     return { ok: true, text: truncada ? content.slice(0, opts.maxChars) : content, ms: Date.now() - t0, proveedor: "litellm", model, truncada, uso };
   } catch (e) {
     const msg = e instanceof Error ? (e.name === "AbortError" ? `timeout ${opts.timeoutMs}ms` : e.message) : String(e);

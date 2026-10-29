@@ -42,6 +42,7 @@ axiom run mi-feature --dry-run --agente          # simula sin gastar
 ```bash
 axiom status                     # vista general del proyecto
 axiom status --trace <task>      # evidencia, hash, juez, bloqueos
+axiom status --trace            # además: últimos turnos con sus trazas (id de correlación)
 axiom memory                     # estado de la memoria: qué crece y qué tiene retención
 axiom memory compact --dry-run   # poda explícita (EXPERIENCE.md / sesiones archivadas)
 axiom ui                         # TUI: orquestación + trabajo
@@ -54,9 +55,19 @@ axiom check                      # preflight: dependencias, config, techo, SQLit
 axiom check editar --agente implementador   # decisión para esa herramienta y ese agente
 axiom validate-spec              # specs y tasks contra esquema
 axiom validate-openapi           # spec ↔ router (web.ts)
-npm run lint:spectral            # lint OpenAPI con Spectral
-npm test                         # build + tests (node:test)
+npm run lint:spectral            # lint OpenAPI con Spectral (rompe ante cualquier warning)
+npm test                         # build + tests + los cinco gates (ver abajo)
 ```
+
+**Qué corre `npm test`**, en orden: `npm run build` → `tsc -p tsconfig.test.json` → `node --test dist-test/*.test.js` → `check:webjs` → `check:seeds` → `check:vocabulario` → `check:boundaries` → `lint:spectral`. Cualquier eslabón que falle corta la cadena con exit ≠ 0. `lint:spectral` pasa `--fail-severity warn`: un warning del contrato de la API también rompe, porque un aviso que nadie mira se convierte en la próxima descripción faltante.
+
+`check:webjs` (`node scripts/check-webjs.mjs`) vigila el `<script>` inline que `web.ts` mete en la página servida, el punto ciego de `tsc`: ahí todo es un string de TypeScript, así que una comilla de más compila sin queja y deja la página muerta en el navegador (el `CARGANDO…` eterno). El gate lee `PAGE` desde `dist/web.js` —por eso corre después del build— y falla si:
+
+- el `<script>` no existe, no cierra, o el HTML justo antes quedó con una etiqueta abierta (el navegador se traga el script como atributo y la página no ejecuta nada);
+- el cuerpo del script no parsea (`vm.Script`, el error de sintaxis aparece en el mensaje);
+- falta un marcador de la lista: las funciones y textos de UI que la página debe seguir trayendo (chat, proveedor, sesiones, módulos, trazas, aprobaciones).
+
+En verde imprime cuántos bytes de script validó, con la forma `check-webjs OK (<bytes> bytes de script, sintaxis válida)`.
 
 ## Módulos (fail-closed por defecto)
 
@@ -114,6 +125,8 @@ axiom agents define nodo-code modelo <modelo|hereda-proveedor>
 axiom agents handoff orquestador nodo-code "Implementar T1"
 axiom agents handoffs
 ```
+
+La topología es un **supervisor jerárquico con handoffs auditados**, no un swarm: el siguiente agente sale de una arista declarada y cada delegación la decide el broker. El criterio, las fuentes y la evidencia en código están en [ADR-0007](docs/decisions/ADR-0007-orquestacion-jerarquica.md).
 
 #### Modelo por agente
 
@@ -268,6 +281,20 @@ Al lado está **Probar conexión**: hace una llamada mínima al proveedor del fo
 `maxChars` corto para no inundar el panel) y enseña la respuesta o el error real del proveedor tal cual
 (por ejemplo el 401 de una clave revocada), en vez de un «no hay modelos» que no explica nada.
 
+## Costos por turno (`pricing.json`)
+
+Cada llamada registra tokens, tokens de cache (OpenAI, Anthropic, Google) y costo USD cuando el
+proyecto declara precios. No hay tabla incorporada: en `<proyecto>/pricing.json` se escriben los
+precios en USD por 1M de tokens y sin ese archivo el costo queda vacío mientras los tokens se miden.
+
+```json
+{ "openai/gpt-4o-mini": { "prompt": 0.15, "cacheLectura": 0.075, "respuesta": 0.60 } }
+```
+
+El costo queda por turno en `uso_log` (con proveedor, modelo y desglose de cache), en el mensaje del
+chat y acumulado en `consumo`, que es lo que muestran `axiom status` y `axiom adapters datos`.
+Fórmula, claves aceptadas y semántica de cache: [docs/costos.md](docs/costos.md).
+
 ## Políticas y techo (broker)
 
 - **Global** (`policies.global.json`): herramientas + techo global (rondas, tokens, calls).
@@ -351,7 +378,7 @@ axiom grafos ver
 ## Validación continua
 
 ```bash
-npm run build && npm test && node dist/cli.js validate-openapi && npm run lint:spectral
+npm test && node dist/cli.js validate-openapi
 ```
 
 ## Por qué "IDE" y no "harness"

@@ -2,6 +2,7 @@
 // UI solo ve presencia booleana. Se guardan en <root>/.axiom-secrets.json (gitignored, 0600).
 import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
+import { valorEnv } from "./env.js";
 
 export const SECRET_KEYS = [
   "OPENAI_API_KEY",
@@ -38,7 +39,7 @@ export function secretsPath(root: string): string {
   return join(root, FILE);
 }
 
-const envKey = (k: SecretKey): string => (process.env[k] ?? "").trim();
+const envKey = (k: SecretKey): string => valorEnv(k) ?? "";
 
 // Una env exportada hace tiempo puede ocultar para siempre la clave guardada
 // desde la web (así «la carga de api en proveedores no hace nada»). Si el valor

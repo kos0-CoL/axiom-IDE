@@ -3,13 +3,14 @@
 import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { addConsumo, getConsumo, listBloqueos, listTrazas, listUsos, openDb, recordBloqueo, recordUso } from "./store.js";
+import { addConsumo, getConsumo, listBloqueos, listTrazas, listTurnos, listUsos, openDb, recordBloqueo, recordUso, trazasDeTurno } from "./store.js";
+import { ENV, copiaEnv, hayEnv } from "./env.js";
 import { TaskContract } from "./contracts.js";
 import { SPEC_TEMPLATE, PLAN_TEMPLATE, TASKS_TEMPLATE, VERIFICATION_TEMPLATE, OVERRIDES_README } from "./preset.js";
 import { check, decide } from "./broker.js";
 import { leerSkill } from "./skills.js";
 import { extraerMarcas, responderTodas } from "./modules/clarify/index.js";
-import { ejecutarScriptSkill } from "./modules/skills/runner.js";
+import { ejecutarScriptSkill } from "./skills.js";
 import { cicloImproductivo, checkTecho } from "./policy.js";
 import { huellaConfig, leerMarca, marcarRun, textoSnapshot } from "./runmark.js";
 import { asegurarExperience, registrarLeccion, textoExperiencia, proponerAjuste, textoPropuestas, verPropuesta, decidirPropuesta, estadoMemoria, compactarMemoria } from "./experience.js";
@@ -442,9 +443,19 @@ export function cmdSkillsRun(root: string, id?: string, script?: string, dryRun 
 
 // Formato de una traza de tool call para la consola: qué, quién, qué decidió,
 // cuánto tardó y el IO resumido (AXM-066). Exportado para los tests.
-export function lineaTraza(z: { ts: string; origen: string; tool: string; agente: string; decision: string; approval_id: string; entrada: string; salida: string; sha_io: string; contexto: string; ms: number }): string {
+export function lineaTraza(z: { ts: string; origen: string; tool: string; agente: string; decision: string; approval_id: string; entrada: string; salida: string; sha_io: string; contexto: string; ms: number; turno_id?: string }): string {
   const io = [z.entrada, z.salida].filter(Boolean).join(" → ") || "sin IO";
-  return `${z.ts} ${z.origen} ${z.tool}${z.agente ? `(${z.agente})` : ""}: ${z.decision}${z.approval_id ? ` id=${z.approval_id}` : ""} ${z.ms}ms io=${io} sha=${z.sha_io.slice(0, 8)}${z.contexto ? ` [${z.contexto}]` : ""}`;
+  return `${z.ts} ${z.origen} ${z.tool}${z.agente ? `(${z.agente})` : ""}: ${z.decision}${z.approval_id ? ` id=${z.approval_id}` : ""} ${z.ms}ms io=${io} sha=${z.sha_io.slice(0, 8)}${z.contexto ? ` [${z.contexto}]` : ""}${z.turno_id ? ` turno=${z.turno_id}` : ""}`;
+}
+
+// Un turno en una línea: mensaje → modelo → herramientas → respuesta. El id es
+// lo que permiten seguir entre `turnos`, `trace_log` y los mensajes del chat.
+export function lineaTurno(t: { id: string; created_at: string; sesion_id: string; agente: string; proveedor: string; modelo: string; tokens: number; cache_lectura: number; cache_escritura: number; costo_usd: number | null; llamadas: number; herramientas: number; ok: number; error: string; ms: number; mensaje_usuario_id: number | null; mensaje_id: number | null; prompt_sha: string }): string {
+  const modelo = [t.proveedor, t.modelo].filter(Boolean).join("/") || "modelo?";
+  const cache = t.cache_lectura || t.cache_escritura ? ` cache=${t.cache_lectura}r+${t.cache_escritura}w` : "";
+  const costo = t.costo_usd === null ? "" : ` $${t.costo_usd.toFixed(6)}`;
+  const msj = t.mensaje_usuario_id === null ? "-" : `${t.mensaje_usuario_id}→${t.mensaje_id ?? "-"}`;
+  return `${t.id} ${t.created_at} ${t.sesion_id ? `sesion=${t.sesion_id} ` : ""}${t.agente || "chat"} ${modelo} ${t.tokens}tok${cache}${costo} llm=${t.llamadas} tools=${t.herramientas} msg=${msj} ${t.ms}ms ${t.ok ? "ok" : `error: ${t.error}`}`;
 }
 
 // conTrace: `status --trace` sin id añade las últimas trazas globales (AXM-066).
@@ -456,7 +467,7 @@ export function cmdStatus(root: string, traceId?: string, conTrace = false): voi
     if (!t) { console.log(`trace: tarea ${traceId} no encontrada`); db.close(); return; }
     const ev: any = db.prepare("SELECT * FROM evidences WHERE task_id=?").get(traceId);
     const bloq = (() => { try { return listBloqueos(root, 100).filter((b) => b.task_id === traceId); } catch { return []; } })();
-    const cons = (() => { try { return getConsumo(root); } catch { return { tokens: 0, calls: 0 }; } })();
+    const cons = (() => { try { return getConsumo(root); } catch { return { tokens: 0, calls: 0, costo: 0 }; } })();
     db.close();
     const verFile = join(activeDir(root, t.spec_id), `verification-${traceId}.md`);
     const errFile = join(activeDir(root, t.spec_id), `verification-${traceId}-ERROR.md`);
@@ -480,6 +491,14 @@ export function cmdStatus(root: string, traceId?: string, conTrace = false): voi
     const trazas = listTrazas(root, 10);
     console.log(`trazas: ${trazas.length ? `últimas ${trazas.length}` : "ninguna"}`);
     for (const z of trazas) console.log(`  ${lineaTraza(z)}`);
+    // Turnos: agrupa la cadena mensaje → modelo → herramientas → respuesta con
+    // un id de correlación, en vez de adivinarla por el texto de `contexto`.
+    const turnos = listTurnos(root, 5);
+    console.log(`turnos: ${turnos.length ? `últimos ${turnos.length}` : "ninguno"}`);
+    for (const t of turnos) {
+      console.log(`  ${lineaTurno(t)}`);
+      for (const z of trazasDeTurno(root, t.id)) console.log(`    traza ${lineaTraza(z)}`);
+    }
   }
 }
 
@@ -676,7 +695,10 @@ export { crear, evaluar, rollback, marcarEstable, listar, remove };
 // F11b: spawn con consumo real — lo medido (o estimado ~4char/tok) va a consumo global.
 export async function cmdSpawn(root: string, task: string, timeoutMs?: number): Promise<string> {
   const s = await adaptersSpawn(root, task, timeoutMs ? { timeoutMs } : {});
-  if (s.uso) { addConsumo(root, s.uso.total, 1); recordUso(root, s.uso); }
+  if (s.uso) {
+    addConsumo(root, s.uso.total, 1, "global", s.uso.costoUsd ?? 0);
+    recordUso(root, { ...s.uso, proveedor: s.proveedor, model: s.model });
+  }
   return formatSpawn(s);
 }
 
@@ -841,7 +863,7 @@ export function cmdServe(root: string, portArg?: string): void {
   // src/, se reconstruye solo y se reinicia sobre el código fresco. El
   // usuario solo ve una línea de "reconstruyendo" y el servidor levanta.
   // AXIOM_SERVE_REBUILT evita un bucle si el rebuild no deja huella.
-  if (!process.env.AXIOM_SERVE_REBUILT) {
+  if (!hayEnv(ENV.AXIOM_SERVE_REBUILT)) {
     const { stale, motivo } = distDesactualizado();
     if (stale) {
       console.error(`axiom serve: ${motivo} — reconstruyendo solo, un momento...`);
@@ -854,7 +876,7 @@ export function cmdServe(root: string, portArg?: string): void {
           const cliPath = join(here, "cli.js");
           const hijo = spawn(process.execPath, [cliPath, "--root", root, "serve", String(port)], {
             stdio: "inherit",
-            env: { ...process.env, AXIOM_SERVE_REBUILT: "1" },
+            env: copiaEnv({ [ENV.AXIOM_SERVE_REBUILT]: "1" }),
           });
           hijo.on("exit", (code) => process.exit(code ?? 0));
           return;
