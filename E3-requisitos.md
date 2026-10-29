@@ -3,7 +3,7 @@
 **Fecha:** 2026-10-20
 **Base:** Maestro v0.2 + ENTREGABLE-2 + UI-SPEC + decisiones 2026-10-20
 **Método:** `to-spec` (síntesis sin entrevista) + `implement-specs` (PRODUCT/TECH por ID). Sin código.
-**Stack fijado:** TS+Bun harness, SpecKit preset/extensión, Docker jail, SQLite+MD, LiteLLM+local, pinned+evaluación.
+**Stack fijado:** TS + Node 22.5+ con npm, SpecKit preset/extensión, Docker jail, SQLite+MD, LiteLLM+local, pinned+evaluación.
 
 ## Problem Statement
 
@@ -113,7 +113,7 @@ MVP-0: CLI `axiom` + preset SpecKit `axiom` + broker permisos + store SQLite + T
 
 ## Implementation Decisions
 
-- Harness TS/Bun, contratos Zod: `Agent, Tool, Policy, Evidence, Budget, Approval`.
+- Harness TS/Node (npm), contratos Zod: `Agent, Tool, Policy, Evidence, Budget, Approval`.
 - MCP stdio local / HTTP stateless remoto; tools con `outputSchema` + `structuredContent` donde aplique.
 - Store `better-sqlite3` + MD; `specs/active/<id>-slug/` + `docs/decisions/ADR-*` (MADR).
 - Sandbox driver interfaz `local|docker|microvm`; MVP solo `docker` endurecido.

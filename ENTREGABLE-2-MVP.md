@@ -6,7 +6,7 @@
 
 ## 0. Decisiones fijadas el 2026-10-20 (no volver a preguntar)
 
-- Stack harness: **TypeScript + Node/Bun**. SpecKit (Python) se integra como preset/extensión, no se reescribe.
+- Stack harness: **TypeScript + Node 22.5+ con npm**. SpecKit (Python) se integra como preset/extensión, no se reescribe.
 - MVP-0 incluye: harness CLI sin editor + vista orquestación + vista trabajo + Telegram aprobaciones + marketplace/evaluación componentes.
 - Aislamiento: **Docker + workspace jail** por defecto.
 - Persistencia: **SQLite + archivos MD**.
@@ -60,7 +60,7 @@ Resto:
 ## 3. Arquitectura mínima
 
 ```
-axiom/ (TS, Bun)
+axiom/ (TS, Node)
   src/contracts/  Agent, Tool(Zod), Policy, Evidence
   src/adapters/   langgraph.ts, mcp.ts (stdio), litellm.ts (gateway opcional), ollama.ts
   src/broker/     check(tool,scope,policy) → allow|deny|ask

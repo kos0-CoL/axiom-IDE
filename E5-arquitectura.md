@@ -4,7 +4,7 @@
 **Base:** v0.2 §§4-6 + E3 + E4 + UI-SPEC
 **Estado:** Propuesta revisable, sin código.
 
-## 1. Componentes (TS+Bun)
+## 1. Componentes (TS + Node)
 
 ```
 cli/ → broker/ → policy/ → adapters/{langgraph,mcp,litellm,ollama} → sandbox/{local|docker}
