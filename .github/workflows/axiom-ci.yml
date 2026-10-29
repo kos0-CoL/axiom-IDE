@@ -19,7 +19,13 @@ permissions:
 jobs:
   test:
     name: npm test
-    runs-on: ubuntu-latest
+    # Imagen fijada a la versión, no `ubuntu-latest`: esa etiqueta apunta a la
+    # imagen vigente de GitHub y migra sola —la migración a Ubuntu 26 está
+    # anunciada desde el 19-10-2026—, así que cambiarían las librerías del
+    # sistema y AppArmor bajo el paso de Chromium sin que nadie toque el repo.
+    # Con la versión explícita el entorno de pruebas cambia cuando se sube acá
+    # a mano, igual que la versión de Playwright de más abajo.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
