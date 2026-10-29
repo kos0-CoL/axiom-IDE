@@ -35,6 +35,17 @@ jobs:
       - name: Instalar dependencias
         run: npm ci --no-audit --no-fund
 
+      # El frontend es un paquete aparte, con su propio package.json y su lock,
+      # y `npm test` no lo toca: sin este paso los 48 archivos de la UI se
+      # pueden romper sin que la suite diga nada. Compila en modo producción
+      # para que `tsc` y Vite vean lo mismo que un build real; el `dist/` que
+      # escribe está ignorado por git.
+      - name: Build del frontend
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
       # El test `verify --url` necesita un motor real: el Chromium del sistema
       # aborta en este runner (AppArmor restringe los user namespaces) y sin
       # captura el caso no puede pasar. Se instala la caché de Playwright, que
